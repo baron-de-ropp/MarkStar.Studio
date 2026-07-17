@@ -142,8 +142,9 @@ class ProseApp(App[None]):
 
     def on_mount(self) -> None:
         for key, command_id, label in self.registry.bindings():
-            # priority so editor focus does not block app commands
-            self.bind(
+            # App.bind() has no priority= kwarg; BindingMap.bind does.
+            # priority so TextArea focus does not block app commands.
+            self._bindings.bind(
                 key,
                 f"run_command('{command_id}')",
                 description=label,
