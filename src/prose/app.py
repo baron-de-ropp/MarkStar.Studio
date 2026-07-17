@@ -55,8 +55,22 @@ class ProseApp(App[None]):
     # (Ctrl+M is ASCII CR — same as Enter in most terminals → just a newline).
     # F9 + Ctrl+Shift+P are safe. Switch menus with ←/→ inside the modal.
     BINDINGS = [
-        Binding("f9", "show_menu", "Menu", show=True, priority=True),
-        Binding("ctrl+shift+p", "show_menu", "Menu", show=True, priority=True),
+        Binding(
+            "ctrl+shift+p",
+            "show_menu",
+            "Menu",
+            show=True,
+            priority=True,
+            key_display="Ctrl+Shift+P",
+        ),
+        Binding(
+            "f9",
+            "show_menu",
+            "Menu",
+            show=True,
+            priority=True,
+            key_display="F9",
+        ),
     ]
 
     def __init__(self, path: Path | None = None) -> None:
@@ -216,7 +230,8 @@ class ProseApp(App[None]):
         words = self.document.word_count()
         status.update(
             f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
-            f"F9/^⇧P menu  ^S save  ^F find  ^Z undo  ^Q quit"
+            f"Ctrl+Shift+P menu  │  Ctrl+S save  │  Ctrl+F find  │  "
+            f"Ctrl+Z undo  │  Ctrl+Q quit"
         )
         if self.document.path:
             self.title = f"Prose — {self.document.path.name}{dirty}"
