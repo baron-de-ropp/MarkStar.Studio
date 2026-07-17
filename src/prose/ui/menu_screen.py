@@ -5,7 +5,6 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option
@@ -19,7 +18,6 @@ class MenuScreen(ModalScreen[str | None]):
     CSS = """
     MenuScreen {
         align: left top;
-        /* Opaque dimmer so the ribbon is obvious */
         background: rgba(0, 0, 0, 0.55);
     }
 
@@ -30,7 +28,6 @@ class MenuScreen(ModalScreen[str | None]):
         background: $boost;
         border: tall $accent;
         padding: 1 1;
-        margin: 0;
     }
 
     #menu-bar {
@@ -39,7 +36,7 @@ class MenuScreen(ModalScreen[str | None]):
         padding: 0 1;
         color: $text;
         text-style: bold;
-        background: $accent 20%;
+        background: $accent 25%;
     }
 
     #menu-options {
@@ -49,7 +46,6 @@ class MenuScreen(ModalScreen[str | None]):
         margin-top: 1;
         border: solid $accent 40%;
         background: $surface;
-        padding: 0 0;
     }
 
     #menu-hint {
@@ -76,7 +72,7 @@ class MenuScreen(ModalScreen[str | None]):
     ) -> None:
         super().__init__()
         self.registry = registry
-        self.menu_names = registry.menu_names()
+        self.menu_names = list(registry.menu_names())
         if menu_name and menu_name in self.menu_names:
             self.menu_index = self.menu_names.index(menu_name)
         else:
@@ -84,7 +80,7 @@ class MenuScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="ribbon"):
-            yield Static("", id="menu-bar")
+            yield Static(" Loading menu… ", id="menu-bar")
             yield OptionList(id="menu-options")
             yield Label(
                 "←/→ switch menu   Enter run   Esc close   F/E/V/H jump",
@@ -92,9 +88,15 @@ class MenuScreen(ModalScreen[str | None]):
             )
 
     def on_mount(self) -> None:
+        # Children are not always queryable during on_mount; defer populate.
+        self.call_after_refresh(self._setup)
+
+    def _setup(self) -> None:
         self._reload_options()
-        options = self.query_one("#menu-options", OptionList)
-        options.focus()
+        try:
+            self.query_one("#menu-options", OptionList).focus()
+        except Exception:
+            pass
 
     def _current_menu(self) -> str:
         if not self.menu_names:
@@ -102,18 +104,28 @@ class MenuScreen(ModalScreen[str | None]):
         return self.menu_names[self.menu_index]
 
     def _commands(self) -> list[Command]:
-        return self.registry.menus().get(self._current_menu(), [])
+        name = self._current_menu()
+        if not name:
+            return []
+        return list(self.registry.menus().get(name, []))
 
     def _reload_options(self) -> None:
+        try:
+            bar = self.query_one("#menu-bar", Static)
+            options = self.query_one("#menu-options", OptionList)
+        except Exception:
+            # Not ready yet — try once more next frame
+            self.call_after_refresh(self._setup)
+            return
+
         parts: list[str] = []
         for name in self.menu_names:
             if name == self._current_menu():
                 parts.append(f"[bold reverse] {name} [/]")
             else:
                 parts.append(f" {name} ")
-        self.query_one("#menu-bar", Static).update("".join(parts) or " (no menus) ")
+        bar.update("".join(parts) if parts else " (no menus) ")
 
-        options = self.query_one("#menu-options", OptionList)
         options.clear_options()
         cmds = self._commands()
         if not cmds:
@@ -131,16 +143,13 @@ class MenuScreen(ModalScreen[str | None]):
             disabled = not cmd.is_enabled()
             label = f"  {cmd.label:<28}{shortcut}"
             options.add_option(Option(label, id=cmd.id, disabled=disabled))
-        options.highlighted = 0
+        if options.option_count > 0:
+            options.highlighted = 0
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         opt_id = event.option.id
         if opt_id and opt_id != "_empty":
             self.dismiss(str(opt_id))
-
-    def on_key(self, event: Key) -> None:
-        # Digit / letter navigation safety: don't let unused keys dismiss
-        pass
 
     def action_cancel(self) -> None:
         self.dismiss(None)

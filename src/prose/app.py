@@ -263,13 +263,19 @@ class ProseApp(App[None]):
 
         def on_close(command_id: str | None) -> None:
             if command_id:
-                self.registry.execute(command_id)
+                try:
+                    self.registry.execute(command_id)
+                except Exception as exc:
+                    self.notify(f"Command failed: {exc}", severity="error")
             try:
                 self.query_one("#editor", TextArea).focus()
             except Exception:
                 pass
 
-        self.push_screen(MenuScreen(self.registry, menu_name), on_close)
+        try:
+            self.push_screen(MenuScreen(self.registry, menu_name), on_close)
+        except Exception as exc:
+            self.notify(f"Could not open menu: {exc}", severity="error")
 
     def cmd_new_file(self) -> None:
         self.document = Document()
