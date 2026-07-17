@@ -23,7 +23,7 @@ pytest
 
 | Key | Action |
 |-----|--------|
-| **F9** or **Ctrl+Shift+M** | Summon menus (←/→ switch menu, Enter run, Esc close) |
+| **F9** or **Ctrl+Shift+P** | Summon menus (←/→ switch menu, Enter run, Esc close) |
 | Ctrl+S | Save |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |
@@ -34,7 +34,8 @@ pytest
 
 Open files from the CLI (`prose chapter.md`). Soft wrap on; status shows word count.
 
-**Menus:** Prose does **not** use Alt (terminals steal it). Use **F9** or **Ctrl+Shift+M**.
+**Menus:** Use **F9** or **Ctrl+Shift+P**.  
+Not Alt (terminals steal it). Not Ctrl+M / Ctrl+Shift+M (in terminals **Ctrl+M is Enter**).
 
 ```bash
 pytest   # 30 tests

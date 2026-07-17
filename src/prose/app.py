@@ -51,12 +51,12 @@ class ProseApp(App[None]):
     }
     """
 
-    # Menu openers: do NOT rely on Alt (terminals steal it). priority so TextArea
-    # does not swallow keys. F9 is WordPerfect-ish and rarely claimed by VTE;
-    # Ctrl+Shift+M is a guaranteed fallback. Switch menus with ←/→ inside the modal.
+    # Menu openers: do NOT use Alt (terminals steal it) or Ctrl+M / Ctrl+Shift+M
+    # (Ctrl+M is ASCII CR — same as Enter in most terminals → just a newline).
+    # F9 + Ctrl+Shift+P are safe. Switch menus with ←/→ inside the modal.
     BINDINGS = [
         Binding("f9", "show_menu", "Menu", show=True, priority=True),
-        Binding("ctrl+shift+m", "show_menu", "Menu", show=True, priority=True),
+        Binding("ctrl+shift+p", "show_menu", "Menu", show=True, priority=True),
     ]
 
     def __init__(self, path: Path | None = None) -> None:
@@ -216,7 +216,7 @@ class ProseApp(App[None]):
         words = self.document.word_count()
         status.update(
             f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
-            f"F9 menu  ^S save  ^F find  ^Z undo  ^Q quit"
+            f"F9/^⇧P menu  ^S save  ^F find  ^Z undo  ^Q quit"
         )
         if self.document.path:
             self.title = f"Prose — {self.document.path.name}{dirty}"
