@@ -53,6 +53,10 @@ class ProseApp(App[None]):
         color: $text-muted;
         background: $surface;
     }
+
+    Footer {
+        background: $boost;
+    }
     """
 
     # Menu openers. F9 is the reliable primary (reaches the app in most terminals).
@@ -159,17 +163,29 @@ class ProseApp(App[None]):
             yield Static("", id="status")
         yield Footer()
 
+    # Commands shown in the bottom Footer support strip (key_display, label).
+    _FOOTER_COMMANDS: dict[str, str] = {
+        "save": "Ctrl+S",
+        "find": "Ctrl+F",
+        "undo": "Ctrl+Z",
+        "quit": "Ctrl+Q",
+    }
+
     def on_mount(self) -> None:
         for key, command_id, label in self.registry.bindings():
             # App.bind() has no priority= kwarg; BindingMap.bind does.
             # priority so TextArea focus does not block app commands.
+            in_footer = command_id in self._FOOTER_COMMANDS
+            key_display = self._FOOTER_COMMANDS.get(command_id)
             self._bindings.bind(
                 key,
                 f"run_command('{command_id}')",
-                description=label,
-                show=False,
+                description=label if in_footer else label,
+                show=in_footer,
                 priority=True,
+                key_display=key_display,
             )
+        self.refresh_bindings()
 
         editor = self.query_one("#editor", TextArea)
         editor.soft_wrap = True
@@ -229,14 +245,15 @@ class ProseApp(App[None]):
             pass
 
     def _refresh_status(self) -> None:
+        """Document metrics strip (above Footer). Shortcuts live in the Footer."""
         status = self.query_one("#status", Static)
         name = self.document.path.name if self.document.path else "Untitled"
         dirty = " •" if self.document.dirty else ""
         words = self.document.word_count()
+        # Metrics on the right-ish feel: name left, counts + dialect after pipes
         status.update(
             f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
-            f"F9 menu  │  Ctrl+S save  │  Ctrl+F find  │  "
-            f"Ctrl+Z undo  │  Ctrl+Q quit"
+            f"press F9 for menu"
         )
         if self.document.path:
             self.title = f"Prose — {self.document.path.name}{dirty}"
