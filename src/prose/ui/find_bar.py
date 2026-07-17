@@ -55,8 +55,8 @@ class FindBar(Static):
             super().__init__()
             self.mode = mode  # "one" | "all"
 
-    def __init__(self, *, show_replace: bool = False) -> None:
-        super().__init__()
+    def __init__(self, *args, show_replace: bool = False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self._show_replace = show_replace
 
     def compose(self) -> ComposeResult:
