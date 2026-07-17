@@ -23,7 +23,8 @@ pytest
 
 | Key | Action |
 |-----|--------|
-| **Alt** / **F10** / **Alt+F**… | Summon menus (←/→ switch menu, Enter run) |
+| **F10** or **Ctrl+Shift+M** | Summon menus (←/→ switch menu, Enter run) |
+| **Alt+F/E/V/…** | Jump to a menu *if* the terminal doesn’t steal Alt (see below) |
 | Ctrl+S | Save |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |
@@ -33,6 +34,8 @@ pytest
 | Ctrl+Q | Quit |
 
 Open files from the CLI (`prose chapter.md`). Soft wrap on; status shows word count.
+
+**Menus and the terminal:** many terminals (GNOME Terminal, etc.) keep **Alt** and sometimes **F10** for *their* menu bar, so those keys never reach Prose. Prefer **Ctrl+Shift+M**. To free Alt/F10, disable menu accelerators / F10 in the terminal’s preferences.
 
 ```bash
 pytest   # 30 tests
