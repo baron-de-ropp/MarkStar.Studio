@@ -23,7 +23,7 @@ pytest
 
 | Key | Action |
 |-----|--------|
-| **F9** or **Ctrl+Shift+P** | Classic **menu ribbon** (File Edit View…) at the top; ←/→ switch, Enter run, Esc close |
+| **F9** | Open the **menu ribbon** (File Edit View…); ←/→ switch, Enter run, Esc close |
 | Ctrl+S | Save |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |
@@ -34,8 +34,9 @@ pytest
 
 Open files from the CLI (`prose chapter.md`). Soft wrap on; status shows word count.
 
-**Menus:** Use **F9** or **Ctrl+Shift+P**.  
-Not Alt (terminals steal it). Not Ctrl+M / Ctrl+Shift+M (in terminals **Ctrl+M is Enter**).
+**Menus:** Press **F9**.  
+`Ctrl+Shift+P` is optional and often stolen by the host terminal/IDE before Prose receives it.  
+Avoid Alt (terminals steal it) and Ctrl+M (same as Enter).
 
 ```bash
 pytest   # 30 tests

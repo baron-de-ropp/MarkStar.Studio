@@ -55,18 +55,10 @@ class ProseApp(App[None]):
     }
     """
 
-    # Menu openers: do NOT use Alt (terminals steal it) or Ctrl+M / Ctrl+Shift+M
-    # (Ctrl+M is ASCII CR — same as Enter in most terminals → just a newline).
-    # F9 + Ctrl+Shift+P are safe. Switch menus with ←/→ inside the modal.
+    # Menu openers. F9 is the reliable primary (reaches the app in most terminals).
+    # Ctrl+Shift+P is often captured by the host terminal/IDE before Prose sees it.
+    # Avoid Alt and Ctrl+M (terminals steal Alt; Ctrl+M == Enter).
     BINDINGS = [
-        Binding(
-            "ctrl+shift+p",
-            "show_menu",
-            "Menu",
-            show=True,
-            priority=True,
-            key_display="Ctrl+Shift+P",
-        ),
         Binding(
             "f9",
             "show_menu",
@@ -74,6 +66,15 @@ class ProseApp(App[None]):
             show=True,
             priority=True,
             key_display="F9",
+        ),
+        # Optional; may not reach the app depending on terminal
+        Binding(
+            "ctrl+shift+p",
+            "show_menu",
+            "Menu",
+            show=False,
+            priority=True,
+            key_display="Ctrl+Shift+P",
         ),
     ]
 
@@ -252,7 +253,7 @@ class ProseApp(App[None]):
         """Hard fallback: some terminals drop priority bindings while TextArea is focused."""
         if isinstance(self.screen, MenuScreen):
             return
-        if event.key in {"f9", "ctrl+shift+p"}:
+        if event.key == "f9" or event.key == "ctrl+shift+p":
             event.stop()
             self._open_menu(None)
 
