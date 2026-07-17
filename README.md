@@ -2,7 +2,7 @@
 
 A terminal word processor for long-form Markdown.
 
-**Status:** v0.1 in progress — **P0** shell + document domain.
+**Status:** v0.1 in progress — **P0** shell + **P1** commands / menus / find.
 
 ## Docs
 
@@ -19,16 +19,24 @@ prose path/to/file.md    # or: python -m prose.app
 pytest
 ```
 
-### P0 keys
+### Keys (P0–P1)
 
 | Key | Action |
 |-----|--------|
+| **Alt** / **F10** / **Alt+F**… | Summon menus (←/→ switch menu, Enter run) |
 | Ctrl+S | Save |
-| Ctrl+Z | Undo |
-| Ctrl+Shift+Z | Redo |
+| Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
+| Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |
+| Ctrl+G | Go to line |
+| Ctrl+A | Select all |
+| Alt+Z | Toggle soft wrap |
 | Ctrl+Q | Quit |
 
-Open files from the CLI for now (`prose chapter.md`). Soft wrap is on; status line shows word count.
+Open files from the CLI (`prose chapter.md`). Soft wrap on; status shows word count.
+
+```bash
+pytest   # 30 tests
+```
 
 ## Stack
 

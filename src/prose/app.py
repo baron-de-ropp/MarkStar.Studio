@@ -1,4 +1,4 @@
-"""Prose TUI entrypoint (P0: buffer shell)."""
+"""Prose TUI entrypoint (P0 shell + P1 commands / menus / find)."""
 
 from __future__ import annotations
 
@@ -10,14 +10,20 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.widgets import Footer, Header, Static, TextArea
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Header, Input, Label, Static, TextArea
+from textual.widgets.text_area import Selection
 
 from prose import __version__
+from prose.commands.registry import Command, CommandRegistry
 from prose.domain.document import Document
+from prose.domain.search import find_next, find_prev, replace_all, replace_match
+from prose.ui.find_bar import FindBar
+from prose.ui.menu_screen import MenuScreen
 
 
 class ProseApp(App[None]):
-    """Minimal writing shell: soft-wrapped editor + word count."""
+    """Writing shell with command registry, Alt menus, and find/replace."""
 
     TITLE = "Prose"
     CSS = """
@@ -25,10 +31,14 @@ class ProseApp(App[None]):
         layout: vertical;
     }
 
+    #main {
+        height: 1fr;
+    }
+
     #editor {
         height: 1fr;
         border: tall $accent 40%;
-        margin: 1 2;
+        margin: 0 2;
         padding: 0 1;
     }
 
@@ -42,11 +52,12 @@ class ProseApp(App[None]):
     """
 
     BINDINGS = [
-        Binding("ctrl+s", "save", "Save", show=True),
-        Binding("ctrl+o", "open_file", "Open", show=True),
-        Binding("ctrl+z", "undo", "Undo", show=True),
-        Binding("ctrl+shift+z", "redo", "Redo", show=True),
-        Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("alt", "show_menu", "Menu", show=False),
+        Binding("alt+f", "show_menu_file", "File", show=False),
+        Binding("alt+e", "show_menu_edit", "Edit", show=False),
+        Binding("alt+v", "show_menu_view", "View", show=False),
+        Binding("alt+h", "show_menu_help", "Help", show=False),
+        Binding("f10", "show_menu", "Menu", show=False),
     ]
 
     def __init__(self, path: Path | None = None) -> None:
@@ -54,17 +65,87 @@ class ProseApp(App[None]):
         self._path_arg = path
         self.document = Document()
         self._syncing = False
+        self.registry = CommandRegistry()
+        self._last_find_end = 0
+        self._build_commands()
+
+    def _build_commands(self) -> None:
+        r = self.registry
+
+        def add(
+            id: str,
+            label: str,
+            menu: str,
+            handler,
+            binding: str | None = None,
+            enabled=None,
+        ) -> None:
+            r.register(
+                Command(
+                    id=id,
+                    label=label,
+                    menu=menu,
+                    binding=binding,
+                    handler=handler,
+                    enabled=enabled,
+                )
+            )
+
+        add("new_file", "New File", "File", self.cmd_new_file, "ctrl+n")
+        add("open_file", "Open File…", "File", self.cmd_open_file, "ctrl+o")
+        add("save", "Save", "File", self.cmd_save, "ctrl+s")
+        add("save_as", "Save As…", "File", self.cmd_save_as, "ctrl+shift+s")
+        add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
+
+        add(
+            "undo",
+            "Undo",
+            "Edit",
+            self.cmd_undo,
+            "ctrl+z",
+            enabled=lambda: self.document.can_undo,
+        )
+        add(
+            "redo",
+            "Redo",
+            "Edit",
+            self.cmd_redo,
+            "ctrl+shift+z",
+            enabled=lambda: self.document.can_redo,
+        )
+        add("find", "Find…", "Edit", self.cmd_find, "ctrl+f")
+        add("replace", "Replace…", "Edit", self.cmd_replace, "ctrl+h")
+        add("find_next", "Find Next", "Edit", self.cmd_find_next)
+        add("find_prev", "Find Previous", "Edit", self.cmd_find_prev)
+        add("replace_one", "Replace Selection", "Edit", self.cmd_replace_one)
+        add("replace_all", "Replace All", "Edit", self.cmd_replace_all)
+        add("go_to_line", "Go To Line…", "Edit", self.cmd_go_to_line, "ctrl+g")
+        add("select_all", "Select All", "Edit", self.cmd_select_all, "ctrl+a")
+
+        add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap, "alt+z")
+
+        add("about", "About…", "Help", self.cmd_about)
+        add(
+            "keyboard_shortcuts",
+            "Keyboard Shortcuts…",
+            "Help",
+            self.cmd_keyboard_shortcuts,
+        )
+        add("send_feedback", "Send Feedback…", "Help", self.cmd_send_feedback)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Vertical():
+        with Vertical(id="main"):
+            yield FindBar(id="find-bar")
             yield TextArea(id="editor")
             yield Static("", id="status")
         yield Footer()
 
     def on_mount(self) -> None:
+        for key, command_id, label in self.registry.bindings():
+            self.bind(key, f"run_command('{command_id}')", description=label, show=False)
+
         editor = self.query_one("#editor", TextArea)
-        # Soft wrap for prose (Textual TextArea)
         editor.soft_wrap = True
         editor.show_line_numbers = False
 
@@ -74,24 +155,52 @@ class ProseApp(App[None]):
             editor.load_text(self.document.text)
             self._syncing = False
             self.title = f"Prose — {self._path_arg.name}"
-        else:
-            if self._path_arg is not None:
-                self.document.path = self._path_arg
-                self.title = f"Prose — {self._path_arg.name}"
-            editor.focus()
-
+        elif self._path_arg is not None:
+            self.document.path = self._path_arg
+            self.title = f"Prose — {self._path_arg.name}"
+        editor.focus()
         self._refresh_status()
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
         if self._syncing:
             return
-        # Push full-buffer replace for P0 (simple; op-based coalescing later)
         new_text = event.text_area.text
         if new_text == self.document.text:
             return
         self.document.set_text(new_text)
         self._refresh_status()
+
+    def _sync_document_from_editor(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        if editor.text != self.document.text:
+            self.document.set_text(editor.text)
+
+    def _push_document_to_editor(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        self._syncing = True
+        editor.load_text(self.document.text)
+        self._syncing = False
+
+    def _cursor_index(self) -> int:
+        editor = self.query_one("#editor", TextArea)
+        row, col = editor.cursor_location
+        try:
+            return int(editor.document.get_index_from_location((row, col)))
+        except Exception:
+            lines = editor.text.split("\n")
+            idx = sum(len(lines[i]) + 1 for i in range(min(row, len(lines))))
+            return idx + col
+
+    def _select_range(self, start: int, end: int) -> None:
+        editor = self.query_one("#editor", TextArea)
+        try:
+            start_loc = editor.document.get_location_from_index(start)
+            end_loc = editor.document.get_location_from_index(end)
+            editor.selection = Selection(start_loc, end_loc)
+            editor.scroll_cursor_visible()
+        except Exception:
+            pass
 
     def _refresh_status(self) -> None:
         status = self.query_one("#status", Static)
@@ -99,20 +208,58 @@ class ProseApp(App[None]):
         dirty = " •" if self.document.dirty else ""
         words = self.document.word_count()
         status.update(
-            f"{name}{dirty}  │  {words} words  │  "
-            f"CommonMark  │  ^S save  ^Z undo  ^⇧Z redo  ^Q quit"
+            f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
+            f"Alt menu  ^S save  ^F find  ^Z undo  ^Q quit"
         )
         if self.document.path:
             self.title = f"Prose — {self.document.path.name}{dirty}"
+        else:
+            self.title = f"Prose — Untitled{dirty}"
 
-    def action_save(self) -> None:
-        editor = self.query_one("#editor", TextArea)
-        # Ensure document matches editor before save
-        if editor.text != self.document.text:
-            self.document.set_text(editor.text)
+    def action_run_command(self, command_id: str) -> None:
+        self.registry.execute(command_id)
 
+    def action_show_menu(self) -> None:
+        self._open_menu(None)
+
+    def action_show_menu_file(self) -> None:
+        self._open_menu("File")
+
+    def action_show_menu_edit(self) -> None:
+        self._open_menu("Edit")
+
+    def action_show_menu_view(self) -> None:
+        self._open_menu("View")
+
+    def action_show_menu_help(self) -> None:
+        self._open_menu("Help")
+
+    def _open_menu(self, menu_name: str | None) -> None:
+        def on_close(command_id: str | None) -> None:
+            if command_id:
+                self.registry.execute(command_id)
+            else:
+                self.query_one("#editor", TextArea).focus()
+
+        self.push_screen(MenuScreen(self.registry, menu_name), on_close)
+
+    def cmd_new_file(self) -> None:
+        self.document = Document()
+        self._last_find_end = 0
+        self._push_document_to_editor()
+        self._refresh_status()
+        self.notify("New file")
+
+    def cmd_open_file(self) -> None:
+        self.notify(
+            "Open: prose path/to/file.md  (file dialog later)",
+            severity="information",
+        )
+
+    def cmd_save(self) -> None:
+        self._sync_document_from_editor()
         if self.document.path is None:
-            self.notify("No path yet — open with: prose path/to/file.md", severity="warning")
+            self.notify("No path — open with: prose path/to/file.md", severity="warning")
             return
         try:
             self.document.save()
@@ -121,30 +268,193 @@ class ProseApp(App[None]):
         except OSError as exc:
             self.notify(f"Save failed: {exc}", severity="error")
 
-    def action_open_file(self) -> None:
-        self.notify("P0: open a file from the CLI — prose path/to/file.md", severity="information")
+    def cmd_save_as(self) -> None:
+        self.notify("Save As: CLI path for now; dialog later", severity="information")
 
-    def action_undo(self) -> None:
-        if not self.document.undo():
+    def cmd_quit(self) -> None:
+        self.exit()
+
+    def cmd_undo(self) -> None:
+        self._sync_document_from_editor()
+        if self.document.undo():
+            self._push_document_to_editor()
+            self._refresh_status()
+
+    def cmd_redo(self) -> None:
+        self._sync_document_from_editor()
+        if self.document.redo():
+            self._push_document_to_editor()
+            self._refresh_status()
+
+    def cmd_find(self) -> None:
+        self.query_one("#find-bar", FindBar).show(replace=False)
+
+    def cmd_replace(self) -> None:
+        self.query_one("#find-bar", FindBar).show(replace=True)
+
+    def cmd_find_next(self) -> None:
+        self._find_direction("next")
+
+    def cmd_find_prev(self) -> None:
+        self._find_direction("prev")
+
+    def cmd_replace_one(self) -> None:
+        self._sync_document_from_editor()
+        bar = self.query_one("#find-bar", FindBar)
+        query = bar.query
+        if not query:
+            self.notify("Open Replace (Ctrl+H) and enter a find string", severity="warning")
+            self.cmd_replace()
             return
+        cursor = self._cursor_index()
+        match = find_next(self.document.text, query, start=cursor)
+        if match is None:
+            match = find_next(self.document.text, query, start=0)
+        if match is None:
+            self.notify(f"Not found: {query!r}", severity="warning")
+            return
+        new_m = replace_match(self.document, match, bar.replacement)
         self._push_document_to_editor()
+        self._select_range(new_m.start, new_m.end)
+        self._last_find_end = new_m.end
         self._refresh_status()
 
-    def action_redo(self) -> None:
-        if not self.document.redo():
+    def cmd_replace_all(self) -> None:
+        self._sync_document_from_editor()
+        bar = self.query_one("#find-bar", FindBar)
+        query = bar.query
+        if not query:
+            self.notify("Open Replace (Ctrl+H) and enter a find string", severity="warning")
+            self.cmd_replace()
             return
+        n = replace_all(self.document, query, bar.replacement)
         self._push_document_to_editor()
         self._refresh_status()
+        self.notify(f"Replaced {n} occurrence(s)")
 
-    def _push_document_to_editor(self) -> None:
+    def cmd_go_to_line(self) -> None:
+        self._sync_document_from_editor()
         editor = self.query_one("#editor", TextArea)
-        self._syncing = True
-        editor.load_text(self.document.text)
-        self._syncing = False
+        lines = max(self.document.text.count("\n") + 1, 1)
+
+        async def _prompt() -> None:
+            raw = await self.push_screen_wait(_LinePrompt(f"Go to line (1–{lines}):"))
+            if raw is None:
+                return
+            try:
+                n = int(raw.strip())
+            except ValueError:
+                self.notify("Not a number", severity="warning")
+                return
+            n = max(1, min(n, lines))
+            editor.move_cursor((n - 1, 0))
+            editor.scroll_cursor_visible()
+            editor.focus()
+
+        self.run_worker(_prompt())
+
+    def cmd_select_all(self) -> None:
+        self.query_one("#editor", TextArea).select_all()
+
+    def cmd_toggle_soft_wrap(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        editor.soft_wrap = not editor.soft_wrap
+        self.notify(f"Soft wrap {'on' if editor.soft_wrap else 'off'}")
+
+    def cmd_about(self) -> None:
+        self.notify(f"Prose {__version__} — terminal Markdown word processor · MIT")
+
+    def cmd_keyboard_shortcuts(self) -> None:
+        lines = [f"{cmd.binding:18} {cmd.label}" for cmd in self.registry if cmd.binding]
+        self.notify("\n".join(lines) if lines else "(no bindings)", timeout=8)
+
+    def cmd_send_feedback(self) -> None:
+        self.notify(
+            "Feedback: daudzegir@gmail.com — I likely won't listen (but try anyway)",
+            timeout=6,
+        )
+
+    @on(FindBar.Submitted)
+    def _on_find_submitted(self, event: FindBar.Submitted) -> None:
+        self._find_direction(event.direction)
+
+    @on(FindBar.Dismissed)
+    def _on_find_dismissed(self) -> None:
+        self.query_one("#editor", TextArea).focus()
+
+    def _find_direction(self, direction: str) -> None:
+        self._sync_document_from_editor()
+        bar = self.query_one("#find-bar", FindBar)
+        query = bar.query
+        if not query:
+            self.notify("Enter a find string", severity="warning")
+            bar.show(replace=False)
+            return
+
+        text = self.document.text
+        cursor = self._cursor_index()
+
+        if direction == "next":
+            start = cursor
+            # If already on a match, advance past it
+            if start < self._last_find_end:
+                start = self._last_find_end
+            match = find_next(text, query, start=start)
+        else:
+            match = find_prev(text, query, start=cursor)
+
+        if match is None:
+            self.notify(f"Not found: {query!r}", severity="warning")
+            return
+
+        self._last_find_end = match.end
+        self._select_range(match.start, match.end)
+
+
+class _LinePrompt(ModalScreen[str | None]):
+    """Tiny modal to ask for a line number."""
+
+    CSS = """
+    _LinePrompt {
+        align: center middle;
+    }
+    #line-panel {
+        width: 40;
+        height: auto;
+        background: $surface;
+        border: tall $accent 50%;
+        padding: 1 2;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("enter", "submit", show=False),
+    ]
+
+    def __init__(self, prompt: str) -> None:
+        super().__init__()
+        self.prompt = prompt
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="line-panel"):
+            yield Label(self.prompt)
+            yield Input(id="line-input")
+
+    def on_mount(self) -> None:
+        self.query_one("#line-input", Input).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_submit(self) -> None:
+        self.dismiss(self.query_one("#line-input", Input).value)
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="prose", description="Prose — terminal Markdown word processor")
+    parser = argparse.ArgumentParser(
+        prog="prose", description="Prose — terminal Markdown word processor"
+    )
     parser.add_argument("path", nargs="?", type=Path, help="Markdown file to open")
     parser.add_argument("--version", action="version", version=f"Prose {__version__}")
     args = parser.parse_args(argv)
