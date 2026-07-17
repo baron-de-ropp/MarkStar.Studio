@@ -235,7 +235,7 @@ class ProseApp(App[None]):
         words = self.document.word_count()
         status.update(
             f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
-            f"Ctrl+Shift+P menu  │  Ctrl+S save  │  Ctrl+F find  │  "
+            f"F9 menu  │  Ctrl+S save  │  Ctrl+F find  │  "
             f"Ctrl+Z undo  │  Ctrl+Q quit"
         )
         if self.document.path:
