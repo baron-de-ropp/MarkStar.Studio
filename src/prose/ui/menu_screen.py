@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option
@@ -18,55 +19,54 @@ class MenuScreen(ModalScreen[str | None]):
     CSS = """
     MenuScreen {
         align: left top;
-        background: $background 40%;
+        /* Opaque dimmer so the ribbon is obvious */
+        background: rgba(0, 0, 0, 0.55);
     }
 
     #ribbon {
         width: 100%;
         height: auto;
-        max-height: 70%;
-        background: $surface;
-        border-bottom: tall $accent 50%;
-        padding: 0 1 1 1;
+        max-height: 80%;
+        background: $boost;
+        border: tall $accent;
+        padding: 1 1;
+        margin: 0;
     }
 
     #menu-bar {
         width: 100%;
         height: 1;
         padding: 0 1;
-        text-style: bold;
-        color: $text-muted;
-    }
-
-    #menu-bar .active-menu {
         color: $text;
-        text-style: bold reverse;
+        text-style: bold;
+        background: $accent 20%;
     }
 
     #menu-options {
         width: 100%;
-        max-height: 20;
-        margin-top: 0;
-        border: tall $accent 30%;
+        height: auto;
+        max-height: 16;
+        margin-top: 1;
+        border: solid $accent 40%;
         background: $surface;
+        padding: 0 0;
     }
 
     #menu-hint {
         color: $text-muted;
-        padding: 0 1;
-        height: 1;
+        padding: 1 1 0 1;
+        height: auto;
     }
     """
 
     BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=False),
-        Binding("left", "prev_menu", "Prev", show=False),
-        Binding("right", "next_menu", "Next", show=False),
-        # letter jump within open ribbon (first letter of menu name)
-        Binding("f", "jump_file", show=False),
-        Binding("e", "jump_edit", show=False),
-        Binding("v", "jump_view", show=False),
-        Binding("h", "jump_help", show=False),
+        Binding("escape", "cancel", "Close", show=False, priority=True),
+        Binding("left", "prev_menu", "Prev", show=False, priority=True),
+        Binding("right", "next_menu", "Next", show=False, priority=True),
+        Binding("f", "jump_file", show=False, priority=True),
+        Binding("e", "jump_edit", show=False, priority=True),
+        Binding("v", "jump_view", show=False, priority=True),
+        Binding("h", "jump_help", show=False, priority=True),
     ]
 
     def __init__(
@@ -87,13 +87,14 @@ class MenuScreen(ModalScreen[str | None]):
             yield Static("", id="menu-bar")
             yield OptionList(id="menu-options")
             yield Label(
-                "←/→ menus  ·  Enter run  ·  Esc close  ·  F/E/V/H jump",
+                "←/→ switch menu   Enter run   Esc close   F/E/V/H jump",
                 id="menu-hint",
             )
 
     def on_mount(self) -> None:
         self._reload_options()
-        self.query_one("#menu-options", OptionList).focus()
+        options = self.query_one("#menu-options", OptionList)
+        options.focus()
 
     def _current_menu(self) -> str:
         if not self.menu_names:
@@ -104,33 +105,42 @@ class MenuScreen(ModalScreen[str | None]):
         return self.registry.menus().get(self._current_menu(), [])
 
     def _reload_options(self) -> None:
-        # Ribbon titles: highlight active like a classic menu bar
         parts: list[str] = []
         for name in self.menu_names:
             if name == self._current_menu():
                 parts.append(f"[bold reverse] {name} [/]")
             else:
                 parts.append(f" {name} ")
-        self.query_one("#menu-bar", Static).update("".join(parts))
+        self.query_one("#menu-bar", Static).update("".join(parts) or " (no menus) ")
 
         options = self.query_one("#menu-options", OptionList)
         options.clear_options()
-        for cmd in self._commands():
+        cmds = self._commands()
+        if not cmds:
+            options.add_option(Option("  (empty menu)", id="_empty", disabled=True))
+            return
+        for cmd in cmds:
             shortcut = ""
             if cmd.binding:
-                # Humanize a bit for the ribbon
-                shortcut = cmd.binding.replace("ctrl+", "Ctrl+").replace("shift+", "Shift+")
-                shortcut = f"  {shortcut}"
+                shortcut = (
+                    cmd.binding.replace("ctrl+", "Ctrl+")
+                    .replace("shift+", "Shift+")
+                    .replace("alt+", "Alt+")
+                )
+                shortcut = f"   {shortcut}"
             disabled = not cmd.is_enabled()
-            label = f"  {cmd.label:<26}{shortcut}"
+            label = f"  {cmd.label:<28}{shortcut}"
             options.add_option(Option(label, id=cmd.id, disabled=disabled))
-        if options.option_count:
-            options.highlighted = 0
+        options.highlighted = 0
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         opt_id = event.option.id
-        if opt_id:
+        if opt_id and opt_id != "_empty":
             self.dismiss(str(opt_id))
+
+    def on_key(self, event: Key) -> None:
+        # Digit / letter navigation safety: don't let unused keys dismiss
+        pass
 
     def action_cancel(self) -> None:
         self.dismiss(None)

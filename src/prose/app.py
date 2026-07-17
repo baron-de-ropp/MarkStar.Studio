@@ -10,6 +10,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, Static, TextArea
 from textual.widgets.text_area import Selection
@@ -247,12 +248,26 @@ class ProseApp(App[None]):
     def action_show_menu(self) -> None:
         self._open_menu(None)
 
+    def on_key(self, event: Key) -> None:
+        """Hard fallback: some terminals drop priority bindings while TextArea is focused."""
+        if isinstance(self.screen, MenuScreen):
+            return
+        if event.key in {"f9", "ctrl+shift+p"}:
+            event.stop()
+            self._open_menu(None)
+
     def _open_menu(self, menu_name: str | None) -> None:
+        # Avoid stacking duplicate ribbons
+        if isinstance(self.screen, MenuScreen):
+            return
+
         def on_close(command_id: str | None) -> None:
             if command_id:
                 self.registry.execute(command_id)
-            else:
+            try:
                 self.query_one("#editor", TextArea).focus()
+            except Exception:
+                pass
 
         self.push_screen(MenuScreen(self.registry, menu_name), on_close)
 
