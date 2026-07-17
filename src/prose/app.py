@@ -51,21 +51,12 @@ class ProseApp(App[None]):
     }
     """
 
-    # Menu openers need priority=True so TextArea doesn't swallow them.
-    # Bare Alt almost never reaches TUI apps (the terminal keeps it).
-    # GNOME/VTE terminals often steal Alt+letter and F10 for *their* menus —
-    # Ctrl+Shift+M is the reliable fallback.
+    # Menu openers: do NOT rely on Alt (terminals steal it). priority so TextArea
+    # does not swallow keys. F9 is WordPerfect-ish and rarely claimed by VTE;
+    # Ctrl+Shift+M is a guaranteed fallback. Switch menus with ←/→ inside the modal.
     BINDINGS = [
-        Binding("f10", "show_menu", "Menu", show=True, priority=True),
+        Binding("f9", "show_menu", "Menu", show=True, priority=True),
         Binding("ctrl+shift+m", "show_menu", "Menu", show=True, priority=True),
-        Binding("alt+f", "show_menu_file", "File", show=False, priority=True),
-        Binding("alt+e", "show_menu_edit", "Edit", show=False, priority=True),
-        Binding("alt+v", "show_menu_view", "View", show=False, priority=True),
-        Binding("alt+h", "show_menu_help", "Help", show=False, priority=True),
-        Binding("alt+i", "show_menu_insert", "Insert", show=False, priority=True),
-        Binding("alt+o", "show_menu_format", "Format", show=False, priority=True),
-        Binding("alt+t", "show_menu_tools", "Tools", show=False, priority=True),
-        Binding("alt+p", "show_menu_project", "Project", show=False, priority=True),
     ]
 
     def __init__(self, path: Path | None = None) -> None:
@@ -224,7 +215,7 @@ class ProseApp(App[None]):
         words = self.document.word_count()
         status.update(
             f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
-            f"F10/^⇧M menu  ^S save  ^F find  ^Z undo  ^Q quit"
+            f"F9 menu  ^S save  ^F find  ^Z undo  ^Q quit"
         )
         if self.document.path:
             self.title = f"Prose — {self.document.path.name}{dirty}"
@@ -236,30 +227,6 @@ class ProseApp(App[None]):
 
     def action_show_menu(self) -> None:
         self._open_menu(None)
-
-    def action_show_menu_file(self) -> None:
-        self._open_menu("File")
-
-    def action_show_menu_edit(self) -> None:
-        self._open_menu("Edit")
-
-    def action_show_menu_view(self) -> None:
-        self._open_menu("View")
-
-    def action_show_menu_help(self) -> None:
-        self._open_menu("Help")
-
-    def action_show_menu_insert(self) -> None:
-        self._open_menu("Insert")
-
-    def action_show_menu_format(self) -> None:
-        self._open_menu("Format")
-
-    def action_show_menu_tools(self) -> None:
-        self._open_menu("Tools")
-
-    def action_show_menu_project(self) -> None:
-        self._open_menu("Project")
 
     def _open_menu(self, menu_name: str | None) -> None:
         def on_close(command_id: str | None) -> None:
