@@ -23,9 +23,12 @@ from prose.ui.menu_screen import MenuScreen
 
 
 class ProseApp(App[None]):
-    """Writing shell with command registry, Alt menus, and find/replace."""
+    """Writing shell with command registry, menus, and find/replace."""
 
     TITLE = "Prose"
+    # Disable Textual's built-in command palette — we use a classic menu ribbon.
+    ENABLE_COMMAND_PALETTE = False
+
     CSS = """
     Screen {
         layout: vertical;

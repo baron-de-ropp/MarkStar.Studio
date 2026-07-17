@@ -23,7 +23,7 @@ pytest
 
 | Key | Action |
 |-----|--------|
-| **F9** or **Ctrl+Shift+P** | Summon menus (←/→ switch menu, Enter run, Esc close) |
+| **F9** or **Ctrl+Shift+P** | Classic **menu ribbon** (File Edit View…) at the top; ←/→ switch, Enter run, Esc close |
 | Ctrl+S | Save |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |

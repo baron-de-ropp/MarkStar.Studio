@@ -1,4 +1,4 @@
-"""Summonable menu — OpenCode-soft list of commands for one menu or the bar."""
+"""Classic menu ribbon — top bar of menu names + dropdown list of commands."""
 
 from __future__ import annotations
 
@@ -6,37 +6,55 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Label, OptionList
+from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from prose.commands.registry import Command, CommandRegistry
 
 
 class MenuScreen(ModalScreen[str | None]):
-    """Pick a command; returns command id or None if cancelled."""
+    """Word/Works-style ribbon: File Edit View… across the top, items drop below."""
 
     CSS = """
     MenuScreen {
-        align: center middle;
+        align: left top;
+        background: $background 40%;
     }
 
-    #menu-panel {
-        width: 48;
-        max-height: 80%;
+    #ribbon {
+        width: 100%;
+        height: auto;
+        max-height: 70%;
         background: $surface;
-        border: tall $accent 50%;
-        padding: 1 2;
+        border-bottom: tall $accent 50%;
+        padding: 0 1 1 1;
     }
 
-    #menu-title {
+    #menu-bar {
+        width: 100%;
+        height: 1;
+        padding: 0 1;
         text-style: bold;
+        color: $text-muted;
+    }
+
+    #menu-bar .active-menu {
         color: $text;
-        padding-bottom: 1;
+        text-style: bold reverse;
+    }
+
+    #menu-options {
+        width: 100%;
+        max-height: 20;
+        margin-top: 0;
+        border: tall $accent 30%;
+        background: $surface;
     }
 
     #menu-hint {
         color: $text-muted;
-        padding-top: 1;
+        padding: 0 1;
+        height: 1;
     }
     """
 
@@ -44,6 +62,11 @@ class MenuScreen(ModalScreen[str | None]):
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("left", "prev_menu", "Prev", show=False),
         Binding("right", "next_menu", "Next", show=False),
+        # letter jump within open ribbon (first letter of menu name)
+        Binding("f", "jump_file", show=False),
+        Binding("e", "jump_edit", show=False),
+        Binding("v", "jump_view", show=False),
+        Binding("h", "jump_help", show=False),
     ]
 
     def __init__(
@@ -60,36 +83,49 @@ class MenuScreen(ModalScreen[str | None]):
             self.menu_index = 0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="menu-panel"):
-            yield Label("", id="menu-title")
+        with Vertical(id="ribbon"):
+            yield Static("", id="menu-bar")
             yield OptionList(id="menu-options")
-            yield Label("Enter run · Esc close · ←/→ menus", id="menu-hint")
+            yield Label(
+                "←/→ menus  ·  Enter run  ·  Esc close  ·  F/E/V/H jump",
+                id="menu-hint",
+            )
 
     def on_mount(self) -> None:
         self._reload_options()
         self.query_one("#menu-options", OptionList).focus()
 
     def _current_menu(self) -> str:
+        if not self.menu_names:
+            return ""
         return self.menu_names[self.menu_index]
 
     def _commands(self) -> list[Command]:
         return self.registry.menus().get(self._current_menu(), [])
 
     def _reload_options(self) -> None:
-        title = self.query_one("#menu-title", Label)
-        bar = "  ".join(
-            f"[bold]{n}[/]" if n == self._current_menu() else n for n in self.menu_names
-        )
-        title.update(f"{bar}")
+        # Ribbon titles: highlight active like a classic menu bar
+        parts: list[str] = []
+        for name in self.menu_names:
+            if name == self._current_menu():
+                parts.append(f"[bold reverse] {name} [/]")
+            else:
+                parts.append(f" {name} ")
+        self.query_one("#menu-bar", Static).update("".join(parts))
 
         options = self.query_one("#menu-options", OptionList)
         options.clear_options()
         for cmd in self._commands():
-            shortcut = f"  {cmd.binding}" if cmd.binding else ""
+            shortcut = ""
+            if cmd.binding:
+                # Humanize a bit for the ribbon
+                shortcut = cmd.binding.replace("ctrl+", "Ctrl+").replace("shift+", "Shift+")
+                shortcut = f"  {shortcut}"
             disabled = not cmd.is_enabled()
-            # Pad label so shortcuts align loosely on the right
-            label = f"{cmd.label:<28}{shortcut}"
+            label = f"  {cmd.label:<26}{shortcut}"
             options.add_option(Option(label, id=cmd.id, disabled=disabled))
+        if options.option_count:
+            options.highlighted = 0
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         opt_id = event.option.id
@@ -110,3 +146,20 @@ class MenuScreen(ModalScreen[str | None]):
             return
         self.menu_index = (self.menu_index + 1) % len(self.menu_names)
         self._reload_options()
+
+    def action_jump_file(self) -> None:
+        self._jump("File")
+
+    def action_jump_edit(self) -> None:
+        self._jump("Edit")
+
+    def action_jump_view(self) -> None:
+        self._jump("View")
+
+    def action_jump_help(self) -> None:
+        self._jump("Help")
+
+    def _jump(self, name: str) -> None:
+        if name in self.menu_names:
+            self.menu_index = self.menu_names.index(name)
+            self._reload_options()
