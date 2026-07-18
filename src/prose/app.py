@@ -12,7 +12,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, Label, Static, TextArea
+from textual.widgets import Input, Label, Static, TextArea
 from textual.widgets.text_area import Selection
 
 from prose import __version__
@@ -102,49 +102,31 @@ class ProseApp(App[None]):
         background: $background;
     }
 
+    /* Bottom chrome: rule · pad · hints · pad */
+    #bottom-chrome {
+        height: auto;
+        background: $background;
+        dock: bottom;
+    }
+
     #status {
         height: 1;
-        dock: bottom;
         padding: 0 5;
         color: $text-muted;
         background: $background;
         border-top: solid $foreground 10%;
     }
 
-    /* Keys: VS Code blue; descriptions: same dim as tab filename */
-    Footer {
+    #support-pad-top, #support-pad-bottom {
+        height: 1;
+        background: $background;
+    }
+
+    #support-hints {
+        height: 1;
+        padding: 0 5;
         background: $background;
         color: $text-muted;
-
-        FooterKey {
-            background: $background;
-            color: $text-muted;
-
-            .footer-key--key {
-                color: $primary;
-                background: $background;
-                text-style: none;
-            }
-
-            .footer-key--description {
-                color: $text-muted;
-                background: $background;
-            }
-
-            &:hover {
-                background: $panel;
-
-                .footer-key--key {
-                    color: $secondary;
-                    background: $panel;
-                }
-
-                .footer-key--description {
-                    color: $text-muted;
-                    background: $panel;
-                }
-            }
-        }
     }
     """
 
@@ -256,32 +238,33 @@ class ProseApp(App[None]):
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
             yield TextArea(id="editor")
-            yield Static("", id="status")
-        yield Footer()
+            with Vertical(id="bottom-chrome"):
+                yield Static("", id="status")
+                yield Static("", id="support-pad-top")
+                yield Static("", id="support-hints")
+                yield Static("", id="support-pad-bottom")
 
-    # Commands shown in the bottom Footer support strip (key_display, label).
-    _FOOTER_COMMANDS: dict[str, str] = {
-        "save": "Ctrl+S",
-        "find": "Ctrl+F",
-        "undo": "Ctrl+Z",
-        "quit": "Ctrl+Q",
-    }
+    # Support-strip shortcuts (key label shown in blue, description dim).
+    _SUPPORT_HINTS: list[tuple[str, str]] = [
+        ("F9", "Menu"),
+        ("Ctrl+S", "Save"),
+        ("Ctrl+F", "Find"),
+        ("Ctrl+Z", "Undo"),
+        ("Ctrl+Q", "Quit"),
+    ]
 
     def on_mount(self) -> None:
         for key, command_id, label in self.registry.bindings():
             # App.bind() has no priority= kwarg; BindingMap.bind does.
-            # priority so TextArea focus does not block app commands.
-            in_footer = command_id in self._FOOTER_COMMANDS
-            key_display = self._FOOTER_COMMANDS.get(command_id)
             self._bindings.bind(
                 key,
                 f"run_command('{command_id}')",
-                description=label if in_footer else label,
-                show=in_footer,
+                description=label,
+                show=False,
                 priority=True,
-                key_display=key_display,
             )
         self.refresh_bindings()
+        self._refresh_support_hints()
 
         editor = self.query_one("#editor", TextArea)
         editor.soft_wrap = True
@@ -350,6 +333,19 @@ class ProseApp(App[None]):
         except Exception:
             pass
 
+    def _refresh_support_hints(self) -> None:
+        """Blue keys + dim labels, separated by '  |  '."""
+        parts: list[str] = []
+        for key, desc in self._SUPPORT_HINTS:
+            # Dim grey ≈ VS Code description / tab-label mute (not theme token in markup)
+            parts.append(f"[#007ACC]{key}[/] [#858585]{desc}[/]")
+        try:
+            # Separators also dim
+            sep = "  [#555555]|[/]  "
+            self.query_one("#support-hints", Static).update(sep.join(parts))
+        except Exception:
+            pass
+
     def _refresh_status(self) -> None:
         """Tab label, metrics strip, and terminal title."""
         name = self.document.path.name if self.document.path else "Untitled"
@@ -363,9 +359,7 @@ class ProseApp(App[None]):
 
         status = self.query_one("#status", Static)
         words = self.document.word_count()
-        status.update(
-            f"{words} words  │  CommonMark  │  vscode-dark  │  press F9 for menu"
-        )
+        status.update(f"{words} words  │  CommonMark  │  vscode-dark")
         self.title = label
 
     def action_run_command(self, command_id: str) -> None:
