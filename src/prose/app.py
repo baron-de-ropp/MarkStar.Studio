@@ -118,15 +118,16 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    /* Seamless prose surface — no frame, same color as the rest of the app.
-       Left padding only so the scrollbar sits flush on the right edge. */
+    /* Seamless prose surface — same 5-col side inset as tab/rules.
+       Scrollbar stays on the widget edge; text content is inset so it does not
+       run into the gutter (matches header/footer rule margins). */
     #editor {
         height: 1fr;
         border: none;
         margin: 0;
-        padding: 0 0 0 5;
+        padding: 0 5;
         background: $background;
-        /* Thin scrollbar (1 cell), muted like tab filename, docked to the right */
+        /* Thin scrollbar (1 cell), muted like tab filename */
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
         scrollbar-gutter: auto;
@@ -181,7 +182,8 @@ class ProseApp(App[None]):
         height: 1;
         width: 100%;
         background: $background;
-        padding: 0 1 0 5;
+        /* Same 5-col inset as tab strip / rules / editor text */
+        padding: 0 5;
     }
 
     #support-hints {
@@ -189,6 +191,7 @@ class ProseApp(App[None]):
         height: 1;
         background: $background;
         color: $text-muted;
+        padding: 0;
     }
 
     #support-metrics {
@@ -197,7 +200,7 @@ class ProseApp(App[None]):
         background: $background;
         color: $text-muted;
         text-align: right;
-        padding: 0 1 0 2;
+        padding: 0;
     }
     """
 
