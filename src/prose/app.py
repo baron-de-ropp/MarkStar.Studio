@@ -222,10 +222,12 @@ class ProseApp(App[None]):
             self._syncing = True
             editor.load_text(self.document.text)
             self._syncing = False
-            self.title = f"Prose — {self._path_arg.name}"
+            self.title = self._path_arg.name
         elif self._path_arg is not None:
             self.document.path = self._path_arg
-            self.title = f"Prose — {self._path_arg.name}"
+            self.title = self._path_arg.name
+        else:
+            self.title = "Untitled"
         editor.focus()
         self._refresh_status()
 
@@ -282,9 +284,9 @@ class ProseApp(App[None]):
             f"press F9 for menu"
         )
         if self.document.path:
-            self.title = f"Prose — {self.document.path.name}{dirty}"
+            self.title = f"{self.document.path.name}{dirty}"
         else:
-            self.title = f"Prose — Untitled{dirty}"
+            self.title = f"Untitled{dirty}"
 
     def action_run_command(self, command_id: str) -> None:
         self.registry.execute(command_id)
