@@ -63,10 +63,10 @@ class ProseApp(App[None]):
         padding: 0 0;
     }
 
+    /* Top rule: full width of tab-strip content (strip already has padding 0 5) */
     #tab-rule {
         height: 1;
-        margin-left: 5;
-        width: 120;
+        width: 100%;
         color: $text-muted 50%;
         background: $background;
     }
@@ -109,11 +109,23 @@ class ProseApp(App[None]):
         dock: bottom;
     }
 
-    /* Drawn with ─ chars so it stays visible; width set in code */
-    #status-rule {
+    /* Bottom rule row: 5-col pad + rule fills remaining (aligns with prose) */
+    #status-rule-row {
         height: 1;
-        margin-left: 5;
-        width: 120;
+        width: 100%;
+        background: $background;
+        padding: 0 1 0 0;
+    }
+
+    #status-rule-pad {
+        width: 5;
+        height: 1;
+        background: $background;
+    }
+
+    #status-rule {
+        width: 1fr;
+        height: 1;
         color: $text-muted 50%;
         background: $background;
         text-style: none;
@@ -261,7 +273,9 @@ class ProseApp(App[None]):
             yield FindBar(id="find-bar")
             yield TextArea(id="editor")
             with Vertical(id="bottom-chrome"):
-                yield Static("", id="status-rule")
+                with Horizontal(id="status-rule-row"):
+                    yield Static("", id="status-rule-pad")
+                    yield Static("", id="status-rule")
                 yield Static("", id="support-pad-top")
                 with Horizontal(id="support-row"):
                     yield Static("", id="support-hints")
@@ -315,38 +329,25 @@ class ProseApp(App[None]):
             self.document.path = self._path_arg
         editor.focus()
         self._refresh_status()
-        self._update_prose_rule_width()
+        self.call_after_refresh(self._update_prose_rules)
 
     def on_resize(self, event) -> None:
-        self._update_prose_rule_width()
+        self.call_after_refresh(self._update_prose_rules)
 
-    def _prose_content_width(self) -> int:
-        """Columns of wrapping text in the editor (the visible prose surface)."""
-        left = self._PROSE_MARGIN_LEFT
-        try:
-            editor = self.query_one("#editor", TextArea)
-            sb = 1
-            try:
-                sb = int(editor.styles.scrollbar_size_vertical) or 1
-            except Exception:
-                pass
-            return max(1, editor.size.width - left - sb)
-        except Exception:
-            return max(1, self.size.width - left - 1)
-
-    def _update_prose_rule_width(self) -> None:
-        """Top/bottom rules match the prose text column (same width as wrapped lines)."""
-        left = self._PROSE_MARGIN_LEFT
-        width = self._prose_content_width()
-        line = "─" * width
+    def _update_prose_rules(self) -> None:
+        """Fill top/bottom rules with ─ to match laid-out width (prose column)."""
         for rule_id in ("#status-rule", "#tab-rule"):
             try:
                 rule = self.query_one(rule_id, Static)
             except Exception:
                 continue
-            rule.styles.margin = (0, 0, 0, left)
-            rule.styles.width = width
-            rule.update(line)
+            # Use the widget's actual laid-out width so we track the prose surface
+            width = max(1, rule.size.width)
+            if width <= 1:
+                # Layout not ready — try again next frame
+                self.call_after_refresh(self._update_prose_rules)
+                return
+            rule.update("─" * width)
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
