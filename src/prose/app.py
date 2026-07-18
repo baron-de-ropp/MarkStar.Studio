@@ -49,7 +49,7 @@ class ProseApp(App[None]):
         padding: 0 5;
     }
 
-    #tab-pad-top, #tab-pad-bottom {
+    #tab-pad-top {
         height: 1;
         background: $background;
     }
@@ -267,8 +267,8 @@ class ProseApp(App[None]):
             # blank · filename · blank · thin rule · (find) · editor
             with Vertical(id="tab-strip"):
                 yield Static("", id="tab-pad-top")
-                yield Static("Untitled", id="tab-label")
-                yield Static("", id="tab-pad-bottom")
+                yield Static("  Untitled  |", id="tab-label")
+                # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
             yield TextArea(id="editor")
@@ -435,7 +435,8 @@ class ProseApp(App[None]):
         label = f"{name}{dirty}"
 
         try:
-            self.query_one("#tab-label", Static).update(f" {label}")
+            # Tab chrome: leading pad, name, trailing "  |" (like a real tab end-cap)
+            self.query_one("#tab-label", Static).update(f"  {label}  |")
         except Exception:
             pass
 
