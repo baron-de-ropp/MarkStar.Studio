@@ -67,7 +67,7 @@ class ProseApp(App[None]):
     #tab-rule {
         height: 1;
         width: 100%;
-        color: $text-muted 50%;
+        color: $text-muted 22%;
         background: $background;
     }
 
@@ -126,7 +126,7 @@ class ProseApp(App[None]):
     #status-rule {
         width: 1fr;
         height: 1;
-        color: $text-muted 50%;
+        color: $text-muted 22%;
         background: $background;
         text-style: none;
     }
