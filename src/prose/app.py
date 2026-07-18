@@ -86,9 +86,9 @@ class ProseApp(App[None]):
         scrollbar-background: $background;
         scrollbar-background-hover: $background;
         scrollbar-background-active: $background;
-        /* Darker than tab filename ($text-muted); low alpha on dark bg = quieter */
-        scrollbar-color: $text-muted 35%;
-        scrollbar-color-hover: $text-muted 50%;
+        /* Nearly invisible until hover/drag */
+        scrollbar-color: $text-muted 12%;
+        scrollbar-color-hover: $text-muted 45%;
         scrollbar-color-active: $text-muted 55%;
         scrollbar-corner-color: $background;
     }
