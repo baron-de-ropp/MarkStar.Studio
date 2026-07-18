@@ -65,10 +65,10 @@ class ProseApp(App[None]):
 
     #tab-rule {
         height: 1;
+        margin-left: 5;
+        width: 120;
+        color: $text-muted 50%;
         background: $background;
-        border-bottom: solid $foreground 10%;
-        margin: 0;
-        padding: 0;
     }
 
     /* Seamless prose surface — no frame, same color as the rest of the app.
@@ -114,7 +114,7 @@ class ProseApp(App[None]):
         height: 1;
         margin-left: 5;
         width: 120;
-        color: $foreground 25%;
+        color: $text-muted 50%;
         background: $background;
         text-style: none;
     }
@@ -321,20 +321,20 @@ class ProseApp(App[None]):
         self._update_prose_rule_width()
 
     def _update_prose_rule_width(self) -> None:
-        """Bottom rule = min(zen max, terminal − left margin − scrollbar)."""
-        try:
-            rule = self.query_one("#status-rule", Static)
-        except Exception:
-            return
+        """Top + bottom rules: min(zen max, terminal − left margin − scrollbar)."""
         left = self._PROSE_MARGIN_LEFT
         max_w = self._PROSE_MAX_WIDTH
-        # 1 cell reserved for the thin scrollbar on the right
         available = max(1, self.size.width - left - 1)
         width = min(max_w, available)
-        rule.styles.margin = (0, 0, 0, left)
-        rule.styles.width = width
-        # Use box-drawing chars (border on empty Static is easy to miss)
-        rule.update("─" * width)
+        line = "─" * width
+        for rule_id in ("#status-rule", "#tab-rule"):
+            try:
+                rule = self.query_one(rule_id, Static)
+            except Exception:
+                continue
+            rule.styles.margin = (0, 0, 0, left)
+            rule.styles.width = width
+            rule.update(line)
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
