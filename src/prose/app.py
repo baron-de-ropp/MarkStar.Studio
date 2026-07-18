@@ -12,6 +12,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
+from textual import events
 from textual.widgets import Input, Label, Static, TextArea
 from textual.widgets.text_area import Selection
 
@@ -24,6 +25,50 @@ from prose.domain.workspace import Workspace
 from prose.ui.find_bar import FindBar
 from prose.ui.menu_screen import MenuScreen
 from prose.ui.themes import DEFAULT_THEME_NAME, VSCODE_DARK
+
+# Keys that mean "next/prev tab" depending on how the terminal encodes Ctrl+Shift+,/.
+_NEXT_TAB_KEYS = frozenset(
+    {
+        "ctrl+shift+.",
+        "ctrl+shift+full_stop",
+        "ctrl+shift+period",
+        "ctrl+shift+greater_than",
+        "ctrl+greater_than",
+        "ctrl+shift+right_angle_bracket",
+    }
+)
+_PREV_TAB_KEYS = frozenset(
+    {
+        "ctrl+shift+,",
+        "ctrl+shift+comma",
+        "ctrl+shift+less_than",
+        "ctrl+less_than",
+        "ctrl+shift+left_angle_bracket",
+    }
+)
+
+
+class ProseTextArea(TextArea):
+    """TextArea that never inserts when a tab-switch chord is pressed.
+
+    Some terminals deliver Ctrl+Shift+. as a printable '>' unless we intercept
+    before TextArea's insert path.
+    """
+
+    async def _on_key(self, event: events.Key) -> None:
+        key = event.key
+        # Also match bare angle brackets if modifiers are encoded only in key name
+        if key in _NEXT_TAB_KEYS or key in {"ctrl+shift+>"}:
+            event.stop()
+            event.prevent_default()
+            self.app.cmd_next_tab()
+            return
+        if key in _PREV_TAB_KEYS or key in {"ctrl+shift+<"}:
+            event.stop()
+            event.prevent_default()
+            self.app.cmd_prev_tab()
+            return
+        await super()._on_key(event)
 
 
 class ProseApp(App[None]):
@@ -186,10 +231,15 @@ class ProseApp(App[None]):
             priority=True,
             key_display="Ctrl+Shift+P",
         ),
-        # Tab switching (Ctrl+Shift = across open files; . / , = > / < keys).
-        # Use full_stop/comma names — a bare ',' is reserved as a Binding list separator.
+        # Tab switching (Ctrl+Shift = across open files; ,/. keys ≈ < > direction).
+        # With Shift held, terminals often report greater_than/less_than — not full_stop/comma.
         Binding("ctrl+shift+full_stop", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+shift+greater_than", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+shift+period", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+greater_than", "next_tab", "Next tab", show=False, priority=True),
         Binding("ctrl+shift+comma", "prev_tab", "Prev tab", show=False, priority=True),
+        Binding("ctrl+shift+less_than", "prev_tab", "Prev tab", show=False, priority=True),
+        Binding("ctrl+less_than", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+right", "word_right", "Word right", show=False, priority=True),
         Binding("ctrl+left", "word_left", "Word left", show=False, priority=True),
         Binding("ctrl+up", "paragraph_up", "Paragraph up", show=False, priority=True),
@@ -292,7 +342,7 @@ class ProseApp(App[None]):
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
-            yield TextArea(id="editor")
+            yield ProseTextArea(id="editor")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
                     yield Static("", id="status-rule-pad")
@@ -326,7 +376,7 @@ class ProseApp(App[None]):
         self.refresh_bindings()
         self._refresh_support_hints()
 
-        editor = self.query_one("#editor", TextArea)
+        editor = self.query_one("#editor", ProseTextArea)
         editor.soft_wrap = True
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
@@ -500,12 +550,25 @@ class ProseApp(App[None]):
             event.stop()
             self._open_menu(None)
             return
-        # Tab switching (Ctrl+Shift+. / ,) — also accept Textual's full_stop/comma names
-        if event.key in {"ctrl+shift+.", "ctrl+shift+full_stop"}:
+        # Tab switching — include greater/less-than (what Shift+,/. often becomes)
+        if event.key in {
+            "ctrl+shift+.",
+            "ctrl+shift+full_stop",
+            "ctrl+shift+period",
+            "ctrl+shift+greater_than",
+            "ctrl+greater_than",
+            "ctrl+shift+right_angle_bracket",
+        }:
             event.stop()
             self.cmd_next_tab()
             return
-        if event.key in {"ctrl+shift+,", "ctrl+shift+comma"}:
+        if event.key in {
+            "ctrl+shift+,",
+            "ctrl+shift+comma",
+            "ctrl+shift+less_than",
+            "ctrl+less_than",
+            "ctrl+shift+left_angle_bracket",
+        }:
             event.stop()
             self.cmd_prev_tab()
             return
