@@ -95,7 +95,8 @@ class ProseApp(App[None]):
     #tab-strip {
         height: auto;
         background: $background;
-        padding: 0 1 0 5;
+        /* 5-col inset both sides (right margin clear of scrollbar column) */
+        padding: 0 5;
     }
 
     #tab-pad-top {
@@ -169,12 +170,12 @@ class ProseApp(App[None]):
         dock: bottom;
     }
 
-    /* Match tab-strip: 5 left, 1 right (scrollbar column) */
+    /* Match tab-strip: 5-col inset both sides */
     #status-rule-row {
         height: 1;
         width: 100%;
         background: $background;
-        padding: 0 1 0 5;
+        padding: 0 5;
     }
 
     #status-rule {
@@ -194,8 +195,8 @@ class ProseApp(App[None]):
         height: 1;
         width: 100%;
         background: $background;
-        /* 5 left, 1 right — metrics align with prose; scrollbar stays at edge */
-        padding: 0 1 0 5;
+        /* Same 5-col side inset as rules; scrollbar stays on editor edge only */
+        padding: 0 5;
     }
 
     #support-hints {
