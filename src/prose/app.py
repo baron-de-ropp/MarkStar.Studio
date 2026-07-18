@@ -111,7 +111,7 @@ class ProseApp(App[None]):
         border-top: solid $foreground 10%;
     }
 
-    /* Same dim as tab filename — not bright white key labels */
+    /* Keys: VS Code blue; descriptions: same dim as tab filename */
     Footer {
         background: $background;
         color: $text-muted;
@@ -121,7 +121,7 @@ class ProseApp(App[None]):
             color: $text-muted;
 
             .footer-key--key {
-                color: $text-muted;
+                color: $primary;
                 background: $background;
                 text-style: none;
             }
@@ -133,9 +133,12 @@ class ProseApp(App[None]):
 
             &:hover {
                 background: $panel;
-                color: $text-muted;
 
-                .footer-key--key,
+                .footer-key--key {
+                    color: $secondary;
+                    background: $panel;
+                }
+
                 .footer-key--description {
                     color: $text-muted;
                     background: $panel;
