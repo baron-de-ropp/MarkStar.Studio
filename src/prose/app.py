@@ -71,16 +71,18 @@ class ProseApp(App[None]):
         padding: 0;
     }
 
-    /* Seamless prose surface — no frame, same color as the rest of the app */
+    /* Seamless prose surface — no frame, same color as the rest of the app.
+       Left padding only so the scrollbar sits flush on the right edge. */
     #editor {
         height: 1fr;
         border: none;
         margin: 0;
-        padding: 0 5;
+        padding: 0 0 0 5;
         background: $background;
-        /* Thin scrollbar (1 cell), muted like tab filename */
+        /* Thin scrollbar (1 cell), muted like tab filename, docked to the right */
         scrollbar-size-vertical: 1;
-        scrollbar-size-horizontal: 1;
+        scrollbar-size-horizontal: 0;
+        scrollbar-gutter: auto;
         scrollbar-background: $background;
         scrollbar-background-hover: $background;
         scrollbar-background-active: $background;
