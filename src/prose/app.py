@@ -267,7 +267,7 @@ class ProseApp(App[None]):
             # blank · filename · blank · thin rule · (find) · editor
             with Vertical(id="tab-strip"):
                 yield Static("", id="tab-pad-top")
-                yield Static("  Untitled  |", id="tab-label")
+                yield Static("  Untitled  |", id="tab-label")  # space before | → • when dirty
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
@@ -431,17 +431,18 @@ class ProseApp(App[None]):
     def _refresh_status(self) -> None:
         """Tab label, support metrics, and terminal title."""
         name = self.document.path.name if self.document.path else "Untitled"
-        dirty = " •" if self.document.dirty else ""
-        label = f"{name}{dirty}"
+        # Slot right after the filename: space when clean, • when dirty — same width
+        mark = "•" if self.document.dirty else " "
+        tab_text = f"  {name}{mark} |"
 
         try:
-            # Tab chrome: leading pad, name, trailing "  |" (like a real tab end-cap)
-            self.query_one("#tab-label", Static).update(f"  {label}  |")
+            self.query_one("#tab-label", Static).update(tab_text)
         except Exception:
             pass
 
         self._refresh_metrics()
-        self.title = label
+        # Terminal title can show dirty without worrying about tab geometry
+        self.title = f"{name}{' •' if self.document.dirty else ''}"
 
     def action_run_command(self, command_id: str) -> None:
         self.registry.execute(command_id)
