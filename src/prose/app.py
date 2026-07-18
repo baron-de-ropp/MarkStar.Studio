@@ -75,6 +75,12 @@ class ProseApp(App[None]):
     Header {
         background: $background;
     }
+
+    /* Hide Textual's default command-palette orb (⭘) — palette is disabled */
+    HeaderIcon {
+        display: none;
+        width: 0;
+    }
     """
 
     # Menu openers. F9 is the reliable primary (reaches the app in most terminals).
