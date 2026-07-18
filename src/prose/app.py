@@ -186,8 +186,13 @@ class ProseApp(App[None]):
             priority=True,
             key_display="Ctrl+Shift+P",
         ),
+        # Ctrl+Tab is often stolen by the host terminal/IDE — F6 is the reliable pair.
+        Binding("f6", "next_tab", "Next tab", show=False, priority=True),
+        Binding("shift+f6", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+tab", "next_tab", "Next tab", show=False, priority=True),
         Binding("ctrl+shift+tab", "prev_tab", "Prev tab", show=False, priority=True),
+        Binding("ctrl+pagedown", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+pageup", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+right", "word_right", "Word right", show=False, priority=True),
         Binding("ctrl+left", "word_left", "Word left", show=False, priority=True),
         Binding("ctrl+up", "paragraph_up", "Paragraph up", show=False, priority=True),
@@ -242,8 +247,8 @@ class ProseApp(App[None]):
         add("save_as", "Save As…", "File", self.cmd_save_as, "ctrl+shift+s")
         add("save_all", "Save All", "File", self.cmd_save_all, "ctrl+alt+s")
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
-        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+tab")
-        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+shift+tab")
+        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "f6")
+        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "shift+f6")
 
         add(
             "undo",
@@ -304,9 +309,9 @@ class ProseApp(App[None]):
     # Support-strip shortcuts (key label shown in blue, description dim).
     _SUPPORT_HINTS: list[tuple[str, str]] = [
         ("F9", "Menu"),
+        ("F6", "Next tab"),
         ("Ctrl+S", "Save"),
         ("Ctrl+F", "Find"),
-        ("Ctrl+Tab", "Tabs"),
         ("Ctrl+Z", "Undo"),
         ("Ctrl+Q", "Quit"),
     ]
@@ -498,12 +503,12 @@ class ProseApp(App[None]):
             event.stop()
             self._open_menu(None)
             return
-        # Tab switching often stolen; still try app-level fallbacks
-        if event.key == "ctrl+tab":
+        # Tab switching — Ctrl+Tab often never reaches the app
+        if event.key in {"f6", "ctrl+tab", "ctrl+pagedown"}:
             event.stop()
             self.cmd_next_tab()
             return
-        if event.key == "ctrl+shift+tab":
+        if event.key in {"shift+f6", "ctrl+shift+tab", "ctrl+pageup"}:
             event.stop()
             self.cmd_prev_tab()
             return

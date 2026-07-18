@@ -24,7 +24,8 @@ pytest
 | Key | Action |
 |-----|--------|
 | **F9** | Open the **menu ribbon** (File Edit View…); ←/→ switch, Enter run, Esc close |
-| **Ctrl+Tab** / **Ctrl+Shift+Tab** | Next / previous tab |
+| **F6** / **Shift+F6** | Next / previous tab (reliable) |
+| **Ctrl+Tab** / **Ctrl+PageDown** | Next tab *if* the terminal doesn’t steal them |
 | **Ctrl+N** / **Ctrl+W** | New tab / close tab |
 | **Ctrl+←/→** | Word hop |
 | **Ctrl+↑/↓** | Paragraph hop |
