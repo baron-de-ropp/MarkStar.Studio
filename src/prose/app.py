@@ -42,11 +42,11 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    /* Tab strip (P1: single file name; multi-tabs later) */
+    /* Outer prose margin (design default ~5 cols; full config later) */
     #tab-strip {
         height: auto;
         background: $background;
-        padding: 0 1;
+        padding: 0 5;
     }
 
     #tab-pad-top, #tab-pad-bottom {
@@ -60,7 +60,7 @@ class ProseApp(App[None]):
         color: $text-muted;
         text-style: none;
         background: $background;
-        padding: 0 1;
+        padding: 0 0;
     }
 
     #tab-rule {
@@ -76,8 +76,18 @@ class ProseApp(App[None]):
         height: 1fr;
         border: none;
         margin: 0;
-        padding: 0 1;
+        padding: 0 5;
         background: $background;
+        /* Thin scrollbar (1 cell), muted like tab filename */
+        scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
+        scrollbar-background: $background;
+        scrollbar-background-hover: $background;
+        scrollbar-background-active: $background;
+        scrollbar-color: $text-muted 70%;
+        scrollbar-color-hover: $text-muted;
+        scrollbar-color-active: $text-muted;
+        scrollbar-corner-color: $background;
     }
 
     #editor:focus {
@@ -92,7 +102,7 @@ class ProseApp(App[None]):
     #status {
         height: 1;
         dock: bottom;
-        padding: 0 2;
+        padding: 0 5;
         color: $text-muted;
         background: $background;
         border-top: solid $foreground 10%;
