@@ -109,12 +109,20 @@ class ProseApp(App[None]):
         dock: bottom;
     }
 
+    /* Rule spans prose column only (left margin + max measure), not full terminal */
+    #status-rule {
+        height: 1;
+        margin-left: 5;
+        width: 120;
+        background: $background;
+        border-bottom: solid $foreground 10%;
+    }
+
     #status {
         height: 1;
         padding: 0 5;
         color: $text-muted;
         background: $background;
-        border-top: solid $foreground 10%;
     }
 
     #support-pad-top, #support-pad-bottom {
@@ -130,6 +138,10 @@ class ProseApp(App[None]):
         color: $text-muted;
     }
     """
+
+    # Matches design-spec prose measure / margin defaults (Preferences later).
+    _PROSE_MARGIN_LEFT = 5
+    _PROSE_MAX_WIDTH = 120
 
     # Menu openers. F9 is the reliable primary (reaches the app in most terminals).
     # Ctrl+Shift+P is often captured by the host terminal/IDE before Prose sees it.
@@ -240,6 +252,7 @@ class ProseApp(App[None]):
             yield FindBar(id="find-bar")
             yield TextArea(id="editor")
             with Vertical(id="bottom-chrome"):
+                yield Static("", id="status-rule")
                 yield Static("", id="status")
                 yield Static("", id="support-pad-top")
                 yield Static("", id="support-hints")
@@ -292,6 +305,24 @@ class ProseApp(App[None]):
             self.document.path = self._path_arg
         editor.focus()
         self._refresh_status()
+        self._update_prose_rule_width()
+
+    def on_resize(self, event) -> None:
+        self._update_prose_rule_width()
+
+    def _update_prose_rule_width(self) -> None:
+        """Bottom rule = min(zen max, terminal − left margin − scrollbar)."""
+        try:
+            rule = self.query_one("#status-rule", Static)
+        except Exception:
+            return
+        left = self._PROSE_MARGIN_LEFT
+        max_w = self._PROSE_MAX_WIDTH
+        # 1 cell reserved for the thin scrollbar on the right
+        available = max(1, self.size.width - left - 1)
+        width = min(max_w, available)
+        rule.styles.margin = (0, 0, 0, left)
+        rule.styles.width = width
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
