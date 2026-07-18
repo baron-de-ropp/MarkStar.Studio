@@ -462,9 +462,11 @@ class ProseApp(App[None]):
         name = doc.path.name if doc.path else "Untitled"
         mark = "•" if doc.dirty else " "
         chip = f"  {name}{mark} |"
+        # Match footer hint labels ($text-muted / dull grey) — not body-text bright
+        # Active tab: same hue, slightly less transparent so it’s findable without going white
         if active:
-            return f"[#D4D4D4]{chip}[/]"
-        return f"[#858585]{chip}[/]"
+            return f"[#858585]{chip}[/]"
+        return f"[#858585 65%]{chip}[/]"
 
     def _refresh_status(self) -> None:
         """Tab strip (all open docs), support metrics, and terminal title."""
