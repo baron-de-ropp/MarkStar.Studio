@@ -55,8 +55,9 @@ class ProseApp(App[None]):
 
     #tab-label {
         height: 1;
-        color: $text;
-        text-style: bold;
+        /* Quieter than prose body — tab chrome, not content */
+        color: $text-muted;
+        text-style: none;
         background: $background;
         padding: 0 1;
     }
