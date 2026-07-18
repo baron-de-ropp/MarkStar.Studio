@@ -328,7 +328,6 @@ Top-level bar:
 | Find… | Ctrl+F |
 | Find Next / Previous | Enter / Shift+Enter (in Find) |
 | Replace… | Ctrl+H |
-| Go To Line… | Ctrl+G |
 | Expand / Shrink selection | Shift+Alt+→ / ← |
 | Move line up / down | Alt+↑ / ↓ |
 | Duplicate line | Ctrl+Shift+D |
