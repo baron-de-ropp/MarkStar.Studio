@@ -156,22 +156,16 @@ class ProseApp(App[None]):
         dock: bottom;
     }
 
-    /* Bottom rule row: 5-col pad + rule fills remaining (aligns with prose) */
+    /* Same side inset as #tab-strip (padding 0 5) — not flush to the scrollbar */
     #status-rule-row {
         height: 1;
         width: 100%;
         background: $background;
-        padding: 0 1 0 0;
-    }
-
-    #status-rule-pad {
-        width: 5;
-        height: 1;
-        background: $background;
+        padding: 0 5;
     }
 
     #status-rule {
-        width: 1fr;
+        width: 100%;
         height: 1;
         color: $text-muted 22%;
         background: $background;
@@ -345,7 +339,6 @@ class ProseApp(App[None]):
             yield ProseTextArea(id="editor")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
-                    yield Static("", id="status-rule-pad")
                     yield Static("", id="status-rule")
                 yield Static("", id="support-pad-top")
                 with Horizontal(id="support-row"):
