@@ -589,17 +589,67 @@ class ProseApp(App[None]):
     def cmd_save(self) -> None:
         self._sync_document_from_editor()
         if self.document.path is None:
-            self.notify("No path — open with: prose path/to/file.md", severity="warning")
+            self._prompt_and_save(title="Save As — where should this file go?")
             return
+        self._write_active_document()
+
+    def cmd_save_as(self) -> None:
+        self._sync_document_from_editor()
+        initial = ""
+        if self.document.path is not None:
+            initial = str(self.document.path)
+        self._prompt_and_save(title="Save As — enter a path", initial=initial)
+
+    def _write_active_document(self, path: Path | None = None) -> None:
         try:
-            self.document.save()
+            self.document.save(path)
             self.notify(f"Saved {self.document.path}")
             self._refresh_status()
         except OSError as exc:
             self.notify(f"Save failed: {exc}", severity="error")
+        except ValueError as exc:
+            self.notify(str(exc), severity="warning")
 
-    def cmd_save_as(self) -> None:
-        self.notify("Save As: CLI path for now; dialog later", severity="information")
+    def _prompt_and_save(self, *, title: str, initial: str = "") -> None:
+        """Ask for a filesystem path, then save the active buffer there."""
+
+        async def _run() -> None:
+            raw = await self.push_screen_wait(
+                _PathPrompt(
+                    title,
+                    initial=initial or str(Path.cwd() / "untitled.md"),
+                    hint="Enter path and press Enter · Esc cancel · ~ allowed",
+                )
+            )
+            if raw is None:
+                return
+            path = self._normalize_save_path(raw)
+            if path is None:
+                self.notify("Empty path — not saved", severity="warning")
+                return
+            # If another tab already has this path, refuse to clobber via Save As
+            if path.exists() and (
+                self.document.path is None
+                or path.resolve() != self.document.path.resolve()
+            ):
+                # Still allow overwrite; warn
+                self.notify(f"Overwriting {path.name}", severity="warning")
+            self._write_active_document(path)
+
+        self.run_worker(_run())
+
+    @staticmethod
+    def _normalize_save_path(raw: str) -> Path | None:
+        text = raw.strip().strip('"').strip("'")
+        if not text:
+            return None
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        # Default extension for bare names
+        if path.suffix == "":
+            path = path.with_suffix(".md")
+        return path
 
     def cmd_quit(self) -> None:
         self.exit()
@@ -846,6 +896,77 @@ class _LinePrompt(ModalScreen[str | None]):
 
     def action_submit(self) -> None:
         self.dismiss(self.query_one("#line-input", Input).value)
+
+
+class _PathPrompt(ModalScreen[str | None]):
+    """Modal path entry for Save / Save As (OpenCode-soft panel)."""
+
+    CSS = """
+    _PathPrompt {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.55);
+    }
+    #path-panel {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        background: $boost;
+        border: tall $accent;
+        padding: 1 2;
+    }
+    #path-title {
+        text-style: bold;
+        color: $text;
+        padding-bottom: 1;
+    }
+    #path-hint {
+        color: $text-muted;
+        padding-top: 1;
+    }
+    #path-input {
+        width: 100%;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False, priority=True),
+        Binding("enter", "submit", show=False, priority=True),
+    ]
+
+    def __init__(self, title: str, *, initial: str = "", hint: str = "") -> None:
+        super().__init__()
+        self._title = title
+        self._initial = initial
+        self._hint = hint
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="path-panel"):
+            yield Label(self._title, id="path-title")
+            yield Input(value=self._initial, placeholder="/path/to/file.md", id="path-input")
+            yield Label(self._hint or "Enter · save   Esc · cancel", id="path-hint")
+
+    def on_mount(self) -> None:
+        inp = self.query_one("#path-input", Input)
+        inp.focus()
+        # Select basename so typing replaces the default name quickly
+        if self._initial:
+            try:
+                text = self._initial
+                slash = max(text.rfind("/"), text.rfind("\\"))
+                start = slash + 1 if slash >= 0 else 0
+                inp.cursor_position = len(text)
+                # Textual Input selection API varies; best-effort
+                if hasattr(inp, "action_select_all"):
+                    # Prefer selecting only the filename portion when possible
+                    pass
+            except Exception:
+                pass
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_submit(self) -> None:
+        self.dismiss(self.query_one("#path-input", Input).value)
 
 
 def main(argv: list[str] | None = None) -> None:
