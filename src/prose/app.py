@@ -320,12 +320,24 @@ class ProseApp(App[None]):
     def on_resize(self, event) -> None:
         self._update_prose_rule_width()
 
-    def _update_prose_rule_width(self) -> None:
-        """Top + bottom rules: min(zen max, terminal − left margin − scrollbar)."""
+    def _prose_content_width(self) -> int:
+        """Columns of wrapping text in the editor (the visible prose surface)."""
         left = self._PROSE_MARGIN_LEFT
-        max_w = self._PROSE_MAX_WIDTH
-        available = max(1, self.size.width - left - 1)
-        width = min(max_w, available)
+        try:
+            editor = self.query_one("#editor", TextArea)
+            sb = 1
+            try:
+                sb = int(editor.styles.scrollbar_size_vertical) or 1
+            except Exception:
+                pass
+            return max(1, editor.size.width - left - sb)
+        except Exception:
+            return max(1, self.size.width - left - 1)
+
+    def _update_prose_rule_width(self) -> None:
+        """Top/bottom rules match the prose text column (same width as wrapped lines)."""
+        left = self._PROSE_MARGIN_LEFT
+        width = self._prose_content_width()
         line = "─" * width
         for rule_id in ("#status-rule", "#tab-rule"):
             try:
