@@ -101,3 +101,11 @@ class Workspace:
         self._docs = [Document()]
         self._active = 0
         return self.active
+
+    def dirty_documents(self) -> list[Document]:
+        """Open buffers with unsaved changes."""
+        return [doc for doc in self._docs if doc.dirty]
+
+    @property
+    def has_dirty(self) -> bool:
+        return any(doc.dirty for doc in self._docs)

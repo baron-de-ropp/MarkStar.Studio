@@ -654,7 +654,32 @@ class ProseApp(App[None]):
         return path
 
     def cmd_quit(self) -> None:
-        self.exit()
+        self._sync_document_from_editor()
+        dirty = self.workspace.dirty_documents()
+        if not dirty:
+            self.exit()
+            return
+
+        names: list[str] = []
+        for doc in dirty:
+            names.append(doc.path.name if doc.path else "Untitled")
+        # Keep message short for the modal
+        if len(names) == 1:
+            detail = f"“{names[0]}” has unsaved changes."
+        else:
+            detail = f"{len(names)} tabs have unsaved changes ({', '.join(names[:4])}{'…' if len(names) > 4 else ''})."
+
+        async def _confirm() -> None:
+            ok = await self.push_screen_wait(
+                _ConfirmQuit(
+                    title="Quit Prose?",
+                    message=detail + "\nQuit anyway and discard unsaved work?",
+                )
+            )
+            if ok:
+                self.exit()
+
+        self.run_worker(_confirm())
 
     def cmd_undo(self) -> None:
         self._sync_document_from_editor()
@@ -969,6 +994,65 @@ class _PathPrompt(ModalScreen[str | None]):
 
     def action_submit(self) -> None:
         self.dismiss(self.query_one("#path-input", Input).value)
+
+
+class _ConfirmQuit(ModalScreen[bool]):
+    """Confirm quitting with dirty buffers. True = quit, False = stay."""
+
+    CSS = """
+    _ConfirmQuit {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.55);
+    }
+    #quit-panel {
+        width: 64;
+        max-width: 90%;
+        height: auto;
+        background: $boost;
+        border: tall $accent;
+        padding: 1 2;
+    }
+    #quit-title {
+        text-style: bold;
+        color: $text;
+        padding-bottom: 1;
+    }
+    #quit-message {
+        color: $text-muted;
+        padding-bottom: 1;
+    }
+    #quit-hint {
+        color: $text-muted;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False, priority=True),
+        Binding("n", "cancel", show=False, priority=True),
+        Binding("enter", "confirm", show=False, priority=True),
+        Binding("y", "confirm", show=False, priority=True),
+        Binding("q", "confirm", show=False, priority=True),
+    ]
+
+    def __init__(self, *, title: str, message: str) -> None:
+        super().__init__()
+        self._title = title
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="quit-panel"):
+            yield Label(self._title, id="quit-title")
+            yield Label(self._message, id="quit-message")
+            yield Label(
+                "[#007ACC]Y[/]/Enter quit  ·  [#007ACC]N[/]/Esc stay",
+                id="quit-hint",
+            )
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
 
 
 def main(argv: list[str] | None = None) -> None:

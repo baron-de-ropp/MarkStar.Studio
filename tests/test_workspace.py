@@ -91,3 +91,15 @@ def test_set_active_bounds() -> None:
     ws.new_document()
     with pytest.raises(IndexError):
         ws.set_active(5)
+
+
+def test_has_dirty() -> None:
+    ws = Workspace()
+    assert ws.has_dirty is False
+    ws.active.insert(0, "x")
+    assert ws.has_dirty is True
+    assert len(ws.dirty_documents()) == 1
+    ws.new_document()
+    assert len(ws.dirty_documents()) == 1
+    ws.active.insert(0, "y")
+    assert len(ws.dirty_documents()) == 2
