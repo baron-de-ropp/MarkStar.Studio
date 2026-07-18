@@ -33,17 +33,30 @@ class ProseApp(App[None]):
     CSS = """
     Screen {
         layout: vertical;
+        background: $background;
     }
 
     #main {
         height: 1fr;
+        background: $background;
     }
 
+    /* Seamless prose surface — no frame, same color as the rest of the app */
     #editor {
         height: 1fr;
-        border: tall $accent 40%;
-        margin: 0 2;
+        border: none;
+        margin: 0;
         padding: 0 1;
+        background: $background;
+    }
+
+    #editor:focus {
+        border: none;
+        background: $background;
+    }
+
+    #editor > .text-area--cursor-line {
+        background: $background;
     }
 
     #status {
@@ -51,11 +64,16 @@ class ProseApp(App[None]):
         dock: bottom;
         padding: 0 2;
         color: $text-muted;
-        background: $surface;
+        background: $background;
+        border-top: solid $foreground 10%;
     }
 
     Footer {
-        background: $boost;
+        background: $background;
+    }
+
+    Header {
+        background: $background;
     }
     """
 
@@ -190,6 +208,8 @@ class ProseApp(App[None]):
         editor = self.query_one("#editor", TextArea)
         editor.soft_wrap = True
         editor.show_line_numbers = False
+        # No distinct "paper" band or gutter chrome
+        editor.highlight_cursor_line = False
 
         if self._path_arg is not None and self._path_arg.exists():
             self.document = Document.load(self._path_arg)
