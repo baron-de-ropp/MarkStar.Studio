@@ -2,7 +2,7 @@
 
 A terminal word processor for long-form Markdown.
 
-**Status:** v0.1 in progress — **P0** shell + **P1** commands / menus / find.
+**Status:** v0.1 in progress — **P0–P2** (shell, menus/find, **multi-file tabs** + motion).
 
 ## Docs
 
@@ -24,6 +24,12 @@ pytest
 | Key | Action |
 |-----|--------|
 | **F9** | Open the **menu ribbon** (File Edit View…); ←/→ switch, Enter run, Esc close |
+| **Ctrl+Tab** / **Ctrl+Shift+Tab** | Next / previous tab |
+| **Ctrl+N** / **Ctrl+W** | New tab / close tab |
+| **Ctrl+←/→** | Word hop |
+| **Ctrl+↑/↓** | Paragraph hop |
+| **Alt+↑/↓** | Move line |
+| **Ctrl+Shift+D** | Duplicate line |
 | Ctrl+S | Save |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
 | Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |

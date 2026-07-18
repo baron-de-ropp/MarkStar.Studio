@@ -18,7 +18,9 @@ from textual.widgets.text_area import Selection
 from prose import __version__
 from prose.commands.registry import Command, CommandRegistry
 from prose.domain.document import Document
+from prose.domain.motion import paragraph_down, paragraph_up, word_left, word_right
 from prose.domain.search import find_next, find_prev, replace_all, replace_match
+from prose.domain.workspace import Workspace
 from prose.ui.find_bar import FindBar
 from prose.ui.menu_screen import MenuScreen
 from prose.ui.themes import DEFAULT_THEME_NAME, VSCODE_DARK
@@ -56,7 +58,7 @@ class ProseApp(App[None]):
 
     #tab-label {
         height: 1;
-        /* Quieter than prose body — tab chrome, not content */
+        /* Quieter than prose body — active tab slightly brighter via markup */
         color: $text-muted;
         text-style: none;
         background: $background;
@@ -176,7 +178,6 @@ class ProseApp(App[None]):
             priority=True,
             key_display="F9",
         ),
-        # Optional; may not reach the app depending on terminal
         Binding(
             "ctrl+shift+p",
             "show_menu",
@@ -185,6 +186,15 @@ class ProseApp(App[None]):
             priority=True,
             key_display="Ctrl+Shift+P",
         ),
+        Binding("ctrl+tab", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+shift+tab", "prev_tab", "Prev tab", show=False, priority=True),
+        Binding("ctrl+right", "word_right", "Word right", show=False, priority=True),
+        Binding("ctrl+left", "word_left", "Word left", show=False, priority=True),
+        Binding("ctrl+up", "paragraph_up", "Paragraph up", show=False, priority=True),
+        Binding("ctrl+down", "paragraph_down", "Paragraph down", show=False, priority=True),
+        Binding("alt+up", "move_line_up", "Move line up", show=False, priority=True),
+        Binding("alt+down", "move_line_down", "Move line down", show=False, priority=True),
+        Binding("ctrl+shift+d", "duplicate_line", "Duplicate line", show=False, priority=True),
     ]
 
     def __init__(self, path: Path | None = None) -> None:
@@ -192,11 +202,15 @@ class ProseApp(App[None]):
         self.register_theme(VSCODE_DARK)
         self.theme = DEFAULT_THEME_NAME
         self._path_arg = path
-        self.document = Document()
+        self.workspace = Workspace()
         self._syncing = False
         self.registry = CommandRegistry()
         self._last_find_end = 0
         self._build_commands()
+
+    @property
+    def document(self) -> Document:
+        return self.workspace.active
 
     def _build_commands(self) -> None:
         r = self.registry
@@ -222,9 +236,14 @@ class ProseApp(App[None]):
 
         add("new_file", "New File", "File", self.cmd_new_file, "ctrl+n")
         add("open_file", "Open File…", "File", self.cmd_open_file, "ctrl+o")
+        add("close", "Close", "File", self.cmd_close, "ctrl+w")
+        add("close_all", "Close All", "File", self.cmd_close_all, "ctrl+alt+w")
         add("save", "Save", "File", self.cmd_save, "ctrl+s")
         add("save_as", "Save As…", "File", self.cmd_save_as, "ctrl+shift+s")
+        add("save_all", "Save All", "File", self.cmd_save_all, "ctrl+alt+s")
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
+        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+tab")
+        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+shift+tab")
 
         add(
             "undo",
@@ -287,6 +306,7 @@ class ProseApp(App[None]):
         ("F9", "Menu"),
         ("Ctrl+S", "Save"),
         ("Ctrl+F", "Find"),
+        ("Ctrl+Tab", "Tabs"),
         ("Ctrl+Z", "Undo"),
         ("Ctrl+Q", "Quit"),
     ]
@@ -320,13 +340,12 @@ class ProseApp(App[None]):
         except Exception:
             pass
 
-        if self._path_arg is not None and self._path_arg.exists():
-            self.document = Document.load(self._path_arg)
-            self._syncing = True
-            editor.load_text(self.document.text)
-            self._syncing = False
-        elif self._path_arg is not None:
-            self.document.path = self._path_arg
+        if self._path_arg is not None:
+            if self._path_arg.exists():
+                self.workspace.open_path(self._path_arg)
+            else:
+                self.workspace.active.path = self._path_arg
+        self._load_active_into_editor()
         editor.focus()
         self._refresh_status()
         self.call_after_refresh(self._update_prose_rules)
@@ -369,11 +388,22 @@ class ProseApp(App[None]):
             self.document.set_text(editor.text)
 
     def _push_document_to_editor(self) -> None:
+        self._load_active_into_editor()
+        self._refresh_metrics()
+
+    def _load_active_into_editor(self) -> None:
         editor = self.query_one("#editor", TextArea)
         self._syncing = True
         editor.load_text(self.document.text)
         self._syncing = False
-        self._refresh_metrics()
+
+    def _switch_tab(self, switcher) -> None:
+        """Sync editor → doc, switch tab via callable, load new doc."""
+        self._sync_document_from_editor()
+        switcher()
+        self._last_find_end = 0
+        self._load_active_into_editor()
+        self._refresh_status()
 
     def _cursor_index(self) -> int:
         editor = self.query_one("#editor", TextArea)
@@ -428,20 +458,28 @@ class ProseApp(App[None]):
         except Exception:
             pass
 
-    def _refresh_status(self) -> None:
-        """Tab label, support metrics, and terminal title."""
-        name = self.document.path.name if self.document.path else "Untitled"
-        # Slot right after the filename: space when clean, • when dirty — same width
-        mark = "•" if self.document.dirty else " "
-        tab_text = f"  {name}{mark} |"
+    def _format_tab_chip(self, doc: Document, *, active: bool) -> str:
+        name = doc.path.name if doc.path else "Untitled"
+        mark = "•" if doc.dirty else " "
+        chip = f"  {name}{mark} |"
+        if active:
+            return f"[#D4D4D4]{chip}[/]"
+        return f"[#858585]{chip}[/]"
 
+    def _refresh_status(self) -> None:
+        """Tab strip (all open docs), support metrics, and terminal title."""
+        chips = [
+            self._format_tab_chip(doc, active=(i == self.workspace.active_index))
+            for i, doc in enumerate(self.workspace.documents)
+        ]
         try:
-            self.query_one("#tab-label", Static).update(tab_text)
+            self.query_one("#tab-label", Static).update("".join(chips))
         except Exception:
             pass
 
         self._refresh_metrics()
-        # Terminal title can show dirty without worrying about tab geometry
+        self.call_after_refresh(self._update_prose_rules)
+        name = self.document.path.name if self.document.path else "Untitled"
         self.title = f"{name}{' •' if self.document.dirty else ''}"
 
     def action_run_command(self, command_id: str) -> None:
@@ -457,6 +495,16 @@ class ProseApp(App[None]):
         if event.key == "f9" or event.key == "ctrl+shift+p":
             event.stop()
             self._open_menu(None)
+            return
+        # Tab switching often stolen; still try app-level fallbacks
+        if event.key == "ctrl+tab":
+            event.stop()
+            self.cmd_next_tab()
+            return
+        if event.key == "ctrl+shift+tab":
+            event.stop()
+            self.cmd_prev_tab()
+            return
 
     def _open_menu(self, menu_name: str | None) -> None:
         # Avoid stacking duplicate ribbons
@@ -480,9 +528,10 @@ class ProseApp(App[None]):
             self.notify(f"Could not open menu: {exc}", severity="error")
 
     def cmd_new_file(self) -> None:
-        self.document = Document()
+        self._sync_document_from_editor()
+        self.workspace.new_document()
         self._last_find_end = 0
-        self._push_document_to_editor()
+        self._load_active_into_editor()
         self._refresh_status()
         self.notify("New file")
 
@@ -491,6 +540,51 @@ class ProseApp(App[None]):
             "Open: prose path/to/file.md  (file dialog later)",
             severity="information",
         )
+
+    def cmd_close(self) -> None:
+        self._sync_document_from_editor()
+        was_dirty = self.document.dirty
+        self.workspace.close_active()
+        self._last_find_end = 0
+        self._load_active_into_editor()
+        self._refresh_status()
+        if was_dirty:
+            self.notify("Closed tab (unsaved buffer discarded)", severity="warning")
+
+    def cmd_close_all(self) -> None:
+        self._sync_document_from_editor()
+        self.workspace.close_all()
+        self._last_find_end = 0
+        self._load_active_into_editor()
+        self._refresh_status()
+
+    def cmd_save_all(self) -> None:
+        self._sync_document_from_editor()
+        saved = 0
+        skipped = 0
+        for doc in self.workspace.documents:
+            if doc.path is None:
+                skipped += 1
+                continue
+            try:
+                doc.save()
+                saved += 1
+            except OSError:
+                skipped += 1
+        self._refresh_status()
+        self.notify(f"Saved {saved} file(s)" + (f", {skipped} skipped" if skipped else ""))
+
+    def cmd_next_tab(self) -> None:
+        self._switch_tab(self.workspace.next_tab)
+
+    def cmd_prev_tab(self) -> None:
+        self._switch_tab(self.workspace.prev_tab)
+
+    def action_next_tab(self) -> None:
+        self.cmd_next_tab()
+
+    def action_prev_tab(self) -> None:
+        self.cmd_prev_tab()
 
     def cmd_save(self) -> None:
         self._sync_document_from_editor()
@@ -591,6 +685,73 @@ class ProseApp(App[None]):
 
     def cmd_select_all(self) -> None:
         self.query_one("#editor", TextArea).select_all()
+
+    def _move_caret_to_index(self, index: int) -> None:
+        editor = self.query_one("#editor", TextArea)
+        try:
+            loc = editor.document.get_location_from_index(index)
+            editor.move_cursor(loc)
+            editor.scroll_cursor_visible()
+        except Exception:
+            pass
+        self._refresh_metrics()
+
+    def action_word_left(self) -> None:
+        self._sync_document_from_editor()
+        idx = word_left(self.document.text, self._cursor_index())
+        self._move_caret_to_index(idx)
+
+    def action_word_right(self) -> None:
+        self._sync_document_from_editor()
+        idx = word_right(self.document.text, self._cursor_index())
+        self._move_caret_to_index(idx)
+
+    def action_paragraph_up(self) -> None:
+        self._sync_document_from_editor()
+        idx = paragraph_up(self.document.text, self._cursor_index())
+        self._move_caret_to_index(idx)
+
+    def action_paragraph_down(self) -> None:
+        self._sync_document_from_editor()
+        idx = paragraph_down(self.document.text, self._cursor_index())
+        self._move_caret_to_index(idx)
+
+    def action_move_line_up(self) -> None:
+        self._sync_document_from_editor()
+        editor = self.query_one("#editor", TextArea)
+        row, col = editor.cursor_location
+        if row <= 0:
+            return
+        lines = self.document.text.split("\n")
+        lines[row - 1], lines[row] = lines[row], lines[row - 1]
+        self.document.set_text("\n".join(lines))
+        self._load_active_into_editor()
+        editor.move_cursor((row - 1, min(col, len(lines[row - 1]))))
+        self._refresh_status()
+
+    def action_move_line_down(self) -> None:
+        self._sync_document_from_editor()
+        editor = self.query_one("#editor", TextArea)
+        row, col = editor.cursor_location
+        lines = self.document.text.split("\n")
+        if row >= len(lines) - 1:
+            return
+        lines[row], lines[row + 1] = lines[row + 1], lines[row]
+        self.document.set_text("\n".join(lines))
+        self._load_active_into_editor()
+        editor.move_cursor((row + 1, min(col, len(lines[row + 1]))))
+        self._refresh_status()
+
+    def action_duplicate_line(self) -> None:
+        self._sync_document_from_editor()
+        editor = self.query_one("#editor", TextArea)
+        row, col = editor.cursor_location
+        lines = self.document.text.split("\n")
+        lines.insert(row + 1, lines[row])
+        self.document.set_text("\n".join(lines))
+        self._load_active_into_editor()
+        editor.move_cursor((row + 1, col))
+        self._refresh_status()
 
     def cmd_toggle_soft_wrap(self) -> None:
         editor = self.query_one("#editor", TextArea)
