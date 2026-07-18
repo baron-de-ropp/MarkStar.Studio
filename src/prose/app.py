@@ -21,6 +21,7 @@ from prose.domain.document import Document
 from prose.domain.search import find_next, find_prev, replace_all, replace_match
 from prose.ui.find_bar import FindBar
 from prose.ui.menu_screen import MenuScreen
+from prose.ui.themes import DEFAULT_THEME_NAME, VSCODE_DARK
 
 
 class ProseApp(App[None]):
@@ -127,6 +128,8 @@ class ProseApp(App[None]):
 
     def __init__(self, path: Path | None = None) -> None:
         super().__init__()
+        self.register_theme(VSCODE_DARK)
+        self.theme = DEFAULT_THEME_NAME
         self._path_arg = path
         self.document = Document()
         self._syncing = False
@@ -240,6 +243,16 @@ class ProseApp(App[None]):
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
+        # Editor syntax/selection colors: Textual's built-in VS Code Dark map
+        try:
+            from textual.widgets.text_area import TextAreaTheme
+
+            vs = TextAreaTheme.get_builtin_theme("vscode_dark")
+            if vs is not None:
+                editor.register_theme(vs)
+                editor.theme = "vscode_dark"
+        except Exception:
+            pass
 
         if self._path_arg is not None and self._path_arg.exists():
             self.document = Document.load(self._path_arg)
@@ -306,7 +319,7 @@ class ProseApp(App[None]):
         status = self.query_one("#status", Static)
         words = self.document.word_count()
         status.update(
-            f"{words} words  │  CommonMark  │  press F9 for menu"
+            f"{words} words  │  CommonMark  │  vscode-dark  │  press F9 for menu"
         )
         self.title = label
 
