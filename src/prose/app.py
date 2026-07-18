@@ -53,7 +53,23 @@ class ProseTextArea(TextArea):
 
     Some terminals deliver Ctrl+Shift+. as a printable '>' unless we intercept
     before TextArea's insert path.
+
+    Also narrows the soft-wrap width so text keeps a 5-column right margin while
+    the widget itself (and its scrollbar) runs flush to the window edge. Right
+    padding can't do this: Textual carves the scrollbar out of the region left
+    over AFTER padding, so padding-right insets the scrollbar as well.
     """
+
+    # Base wrap_width already reserves the scrollbar column (via
+    # scrollable_content_region) and 1 cursor cell; 3 more blank columns makes
+    # the full 5-col right inset, so text ends at the same column as the rules
+    # (which use `padding: 0 5`).
+    EXTRA_RIGHT_MARGIN = 3
+
+    @property
+    def wrap_width(self) -> int:
+        width = super().wrap_width
+        return max(0, width - self.EXTRA_RIGHT_MARGIN) if width else width
 
     async def _on_key(self, event: events.Key) -> None:
         key = event.key
@@ -122,8 +138,12 @@ class ProseApp(App[None]):
     }
 
     /* Editor row: 5-col left gutter + TextArea to the window edge (scrollbar flush).
-       padding-right: 4 + scrollbar 1 = 5-col right inset for text, matching rules
-       (rules use padding 0 5; text ends at the same column as the rule ends). */
+       The TextArea must have NO right padding: Textual splits the scrollbar off the
+       region AFTER shrinking by padding (_compositor.py: region.shrink(styles.gutter)
+       then _arrange_scrollbars), so any right pad insets the scrollbar too. The 5-col
+       right text inset comes from ProseTextArea.wrap_width instead. scrollbar-gutter:
+       stable reserves the bar column even when the document fits, keeping the wrap
+       column identical whether or not the bar is drawn. */
     #editor-row {
         height: 1fr;
         width: 100%;
@@ -141,12 +161,13 @@ class ProseApp(App[None]):
         height: 1fr;
         border: none;
         margin: 0;
-        /* Only right pad — left is the gutter widget. Keep scrollbar at widget edge. */
-        padding: 0 4 0 0;
+        /* No padding at all — left inset is the gutter widget, right inset lives in
+           ProseTextArea.wrap_width so the scrollbar stays flush at the window edge. */
+        padding: 0;
         background: $background;
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
-        scrollbar-gutter: auto;
+        scrollbar-gutter: stable;
         scrollbar-background: $background;
         scrollbar-background-hover: $background;
         scrollbar-background-active: $background;
@@ -331,7 +352,6 @@ class ProseApp(App[None]):
         add("find_prev", "Find Previous", "Edit", self.cmd_find_prev)
         add("replace_one", "Replace Selection", "Edit", self.cmd_replace_one)
         add("replace_all", "Replace All", "Edit", self.cmd_replace_all)
-        add("go_to_line", "Go To Line…", "Edit", self.cmd_go_to_line, "ctrl+g")
         add("select_all", "Select All", "Edit", self.cmd_select_all, "ctrl+a")
 
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap, "alt+z")
@@ -831,27 +851,6 @@ class ProseApp(App[None]):
         self._refresh_status()
         self.notify(f"Replaced {n} occurrence(s)")
 
-    def cmd_go_to_line(self) -> None:
-        self._sync_document_from_editor()
-        editor = self.query_one("#editor", TextArea)
-        lines = max(self.document.text.count("\n") + 1, 1)
-
-        async def _prompt() -> None:
-            raw = await self.push_screen_wait(_LinePrompt(f"Go to line (1–{lines}):"))
-            if raw is None:
-                return
-            try:
-                n = int(raw.strip())
-            except ValueError:
-                self.notify("Not a number", severity="warning")
-                return
-            n = max(1, min(n, lines))
-            editor.move_cursor((n - 1, 0))
-            editor.scroll_cursor_visible()
-            editor.focus()
-
-        self.run_worker(_prompt())
-
     def cmd_select_all(self) -> None:
         self.query_one("#editor", TextArea).select_all()
 
@@ -975,46 +974,6 @@ class ProseApp(App[None]):
 
         self._last_find_end = match.end
         self._select_range(match.start, match.end)
-
-
-class _LinePrompt(ModalScreen[str | None]):
-    """Tiny modal to ask for a line number."""
-
-    CSS = """
-    _LinePrompt {
-        align: center middle;
-    }
-    #line-panel {
-        width: 40;
-        height: auto;
-        background: $surface;
-        border: tall $accent 50%;
-        padding: 1 2;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", show=False),
-        Binding("enter", "submit", show=False),
-    ]
-
-    def __init__(self, prompt: str) -> None:
-        super().__init__()
-        self.prompt = prompt
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="line-panel"):
-            yield Label(self.prompt)
-            yield Input(id="line-input")
-
-    def on_mount(self) -> None:
-        self.query_one("#line-input", Input).focus()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def action_submit(self) -> None:
-        self.dismiss(self.query_one("#line-input", Input).value)
 
 
 class _PathPrompt(ModalScreen[str | None]):
