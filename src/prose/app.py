@@ -113,6 +113,35 @@ class ProseApp(App[None]):
 
     Footer {
         background: $background;
+        color: $text-muted;
+    }
+
+    /* Same dim as tab filename — not bright white key labels */
+    FooterKey {
+        background: $background;
+        color: $text-muted;
+    }
+
+    FooterKey > .footer-key--key {
+        color: $text-muted;
+        background: $background;
+        text-style: none;
+    }
+
+    FooterKey > .footer-key--description {
+        color: $text-muted;
+        background: $background;
+    }
+
+    FooterKey:hover {
+        background: $background;
+        color: $text-muted;
+    }
+
+    FooterKey:hover > .footer-key--key,
+    FooterKey:hover > .footer-key--description {
+        color: $text-muted;
+        background: $panel;
     }
     """
 
