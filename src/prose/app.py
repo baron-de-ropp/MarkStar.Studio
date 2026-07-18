@@ -286,7 +286,7 @@ class ProseApp(App[None]):
             # blank · filename · blank · thin rule · (find) · editor
             with Vertical(id="tab-strip"):
                 yield Static("", id="tab-pad-top")
-                yield Static("  Untitled  |", id="tab-label")  # space before | → • when dirty
+                yield Static("  Untitled   |", id="tab-label")  # three slots; middle → • when dirty
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
@@ -460,10 +460,10 @@ class ProseApp(App[None]):
 
     def _format_tab_chip(self, doc: Document, *, active: bool) -> str:
         name = doc.path.name if doc.path else "Untitled"
-        mark = "•" if doc.dirty else " "
-        chip = f"  {name}{mark} |"
+        # Three slots after the name: " _ _ _|" — middle slot is dirty • (stable width)
+        mid = "•" if doc.dirty else " "
+        chip = f"  {name} {mid} |"
         # Match footer hint labels ($text-muted / dull grey) — not body-text bright
-        # Active tab: same hue, slightly less transparent so it’s findable without going white
         if active:
             return f"[#858585]{chip}[/]"
         return f"[#858585 65%]{chip}[/]"
