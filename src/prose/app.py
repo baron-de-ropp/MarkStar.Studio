@@ -186,12 +186,12 @@ class ProseApp(App[None]):
             priority=True,
             key_display="Ctrl+Shift+P",
         ),
-        # Tab switching: prefer letter chords (reach the app like Ctrl+Shift+Z).
-        # Ctrl+Tab / brackets are often stolen or not delivered by terminals.
+        # Tab switching. Prefer PageUp/Down chords (explicit, usually delivered).
+        # Ctrl+Tab / brackets / J-K are fallbacks only.
+        Binding("ctrl+shift+pagedown", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+shift+pageup", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+shift+j", "next_tab", "Next tab", show=False, priority=True),
         Binding("ctrl+shift+k", "prev_tab", "Prev tab", show=False, priority=True),
-        Binding("ctrl+shift+]", "next_tab", "Next tab", show=False, priority=True),
-        Binding("ctrl+shift+[", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+tab", "next_tab", "Next tab", show=False, priority=True),
         Binding("ctrl+shift+tab", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+right", "word_right", "Word right", show=False, priority=True),
@@ -248,8 +248,8 @@ class ProseApp(App[None]):
         add("save_as", "Save As…", "File", self.cmd_save_as, "ctrl+shift+s")
         add("save_all", "Save All", "File", self.cmd_save_all, "ctrl+alt+s")
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
-        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+shift+j")
-        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+shift+k")
+        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+shift+pagedown")
+        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+shift+pageup")
 
         add(
             "undo",
@@ -310,7 +310,7 @@ class ProseApp(App[None]):
     # Support-strip shortcuts (key label shown in blue, description dim).
     _SUPPORT_HINTS: list[tuple[str, str]] = [
         ("F9", "Menu"),
-        ("Ctrl+Shift+J", "Next tab"),
+        ("Ctrl+Shift+PgDn", "Next tab"),
         ("Ctrl+S", "Save"),
         ("Ctrl+F", "Find"),
         ("Ctrl+Z", "Undo"),
@@ -506,18 +506,16 @@ class ProseApp(App[None]):
             return
         # Tab switching fallbacks (host terminals eat many of these)
         if event.key in {
+            "ctrl+shift+pagedown",
             "ctrl+shift+j",
-            "ctrl+shift+]",
-            "ctrl+shift+right_square_bracket",
             "ctrl+tab",
         }:
             event.stop()
             self.cmd_next_tab()
             return
         if event.key in {
+            "ctrl+shift+pageup",
             "ctrl+shift+k",
-            "ctrl+shift+[",
-            "ctrl+shift+left_square_bracket",
             "ctrl+shift+tab",
         }:
             event.stop()
