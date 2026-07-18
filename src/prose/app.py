@@ -267,7 +267,7 @@ class ProseApp(App[None]):
             # blank · filename · blank · thin rule · (find) · editor
             with Vertical(id="tab-strip"):
                 yield Static("", id="tab-pad-top")
-                yield Static("  Untitled  |", id="tab-label")  # space before | → • when dirty
+                yield Static("  Untitled  │", id="tab-label")  # mark slot → • when dirty; │ joins rule via ┴
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
@@ -334,20 +334,35 @@ class ProseApp(App[None]):
     def on_resize(self, event) -> None:
         self.call_after_refresh(self._update_prose_rules)
 
+    def _tab_cap_column(self) -> int | None:
+        """Column index of the tab's │ within the tab-strip content (0-based)."""
+        try:
+            label = str(self.query_one("#tab-label", Static).render())
+        except Exception:
+            return None
+        # Format is always: "  {name}{mark} │" — cap is the last character
+        if not label.endswith("│"):
+            idx = label.rfind("│")
+            return idx if idx >= 0 else None
+        return len(label) - 1
+
     def _update_prose_rules(self) -> None:
-        """Fill top/bottom rules with ─ to match laid-out width (prose column)."""
+        """Fill top/bottom rules with ─; top rule joins tab cap with ┴."""
+        join_col = self._tab_cap_column()
         for rule_id in ("#status-rule", "#tab-rule"):
             try:
                 rule = self.query_one(rule_id, Static)
             except Exception:
                 continue
-            # Use the widget's actual laid-out width so we track the prose surface
             width = max(1, rule.size.width)
             if width <= 1:
-                # Layout not ready — try again next frame
                 self.call_after_refresh(self._update_prose_rules)
                 return
-            rule.update("─" * width)
+            chars = ["─"] * width
+            # Upside-down T under the tab's vertical bar (top rule only)
+            if rule_id == "#tab-rule" and join_col is not None and 0 <= join_col < width:
+                chars[join_col] = "┴"
+            rule.update("".join(chars))
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
@@ -433,7 +448,8 @@ class ProseApp(App[None]):
         name = self.document.path.name if self.document.path else "Untitled"
         # Slot right after the filename: space when clean, • when dirty — same width
         mark = "•" if self.document.dirty else " "
-        tab_text = f"  {name}{mark} |"
+        # Box-drawing vertical; joins the rule below via ┴
+        tab_text = f"  {name}{mark} │"
 
         try:
             self.query_one("#tab-label", Static).update(tab_text)
@@ -441,6 +457,9 @@ class ProseApp(App[None]):
             pass
 
         self._refresh_metrics()
+        # Re-seat the ┴ under the cap when name/dirty length is unchanged it's free;
+        # still cheap to refresh after tab text updates.
+        self.call_after_refresh(self._update_prose_rules)
         # Terminal title can show dirty without worrying about tab geometry
         self.title = f"{name}{' •' if self.document.dirty else ''}"
 
