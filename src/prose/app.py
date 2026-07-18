@@ -121,8 +121,9 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    /* Editor row: 5-col left gutter + TextArea filling to the window edge
-       so the thin scrollbar is flush right (padding-right would inset it). */
+    /* Editor row: 5-col left gutter + TextArea to the window edge (scrollbar flush).
+       padding-right: 4 + scrollbar 1 = 5-col right inset for text, matching rules
+       (rules use padding 0 5; text ends at the same column as the rule ends). */
     #editor-row {
         height: 1fr;
         width: 100%;
@@ -140,7 +141,8 @@ class ProseApp(App[None]):
         height: 1fr;
         border: none;
         margin: 0;
-        padding: 0;
+        /* Only right pad — left is the gutter widget. Keep scrollbar at widget edge. */
+        padding: 0 4 0 0;
         background: $background;
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
