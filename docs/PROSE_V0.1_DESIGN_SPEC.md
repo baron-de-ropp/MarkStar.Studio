@@ -258,8 +258,10 @@ prose/
 
 ### 5.6 Find / Replace
 
-- **Ctrl+F** / **Ctrl+H** → bar at **top of prose frame** (VS Code–like).
-- **Enter** / **Shift+Enter** → next / previous (while find active).
+- **Ctrl+F** / **Ctrl+R** → bar at **top of prose frame** (VS Code–like).
+- **Enter** in find field → next match; **Enter** in replace field → replace one.
+- **Ctrl+Enter** → previous (when the terminal reports the chord).
+- **Ctrl+Alt+R** → replace all (same bulk pattern as Save All / Close All).
 - Esc dismisses.
 - Footer does not morph into find.
 
@@ -326,8 +328,9 @@ Top-level bar:
 | Cut / Copy / Paste | Ctrl+X / C / V |
 | Select All | Ctrl+A |
 | Find… | Ctrl+F |
-| Find Next / Previous | Enter / Shift+Enter (in Find) |
-| Replace… | Ctrl+H |
+| Replace… | Ctrl+R |
+| Find Next / Previous | Enter / Ctrl+Enter (in Find) |
+| Replace one / all | Enter (replace field) / Ctrl+Alt+R |
 | Expand / Shrink selection | Shift+Alt+→ / ← |
 | Move line up / down | Alt+↑ / ↓ |
 | Duplicate line | Ctrl+Shift+D |

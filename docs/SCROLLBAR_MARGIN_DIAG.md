@@ -243,3 +243,42 @@ Do **not** need to change `Document` / `Workspace` for this bug.
 - App name: **Prose** (terminal Markdown writer)
 - Design spec: `docs/PROSE_V0.1_DESIGN_SPEC.md` (margins 5 / zen 120 mentioned; zen not required for this fix)
 - Prefer minimal, reversible CSS/layout change over a rewrite
+
+---
+
+## 13. ADDENDUM — RESOLVED (2026-07-17)
+
+### Root cause (proven from Textual 8.2.8 source, not inferred)
+
+Hypotheses 4 and 5 in §5 collapse into one mechanism. In `textual/_compositor.py:584`:
+
+```python
+container_region = region.shrink(styles.gutter)
+```
+
+where `styles.gutter` = **padding + border** (`textual/css/styles.py:613`). The scrollbar is then carved out of *that already-shrunk region* via `_arrange_scrollbars(container_region)` (`_compositor.py:708`). Consequence: **any right padding on the widget that owns the scrollbar insets the scrollbar by that padding.** Attempt C (`padding: 0 4 0 0`) placed the scrollbar at column W-5 — exactly the user's "not flush" report. No padding value can satisfy §1's constraints; the contradiction is structural.
+
+### Fix applied (`src/prose/app.py`)
+
+The escape hatch is `TextArea.wrap_width` (`textual/widgets/_text_area.py:1225`) — a plain property re-read on every rewrap/resize that controls where *text* soft-wraps, independent of the widget box.
+
+1. **CSS `#editor`:** `padding: 0 4 0 0` → `padding: 0` (scrollbar now flush at W-1), and `scrollbar-gutter: auto` → `stable` (reserves the bar column even when the document fits, so the wrap column never shifts by 1 when the bar appears/disappears).
+2. **`ProseTextArea.wrap_width` override:** returns `super().wrap_width - 3` (class constant `EXTRA_RIGHT_MARGIN = 3`). The base value already reserves the scrollbar column (via `scrollable_content_region`) plus 1 cursor cell; 3 more blank columns yields the full 5-column right inset, so text ends at the same column as the rules (`padding: 0 5`).
+
+DOM structure (§3) is unchanged — left gutter widget stays.
+
+### Measured geometry (headless pilot, `run_test(size=(100, 30))`)
+
+| Measurement | Value | Constraint |
+|---|---|---|
+| `#editor.region` | `x=5, width=95` | left edge col 5 ✓ |
+| scrollbar region | `x=99, width=1` | flush right, 1 cell ✓ |
+| `wrap_width` | 90 | — |
+| text last column | 94 | == rule last column 94 ✓ |
+| right inset from edge | 5 cols | 4 blank + 1 scrollbar ✓ |
+
+Rendered-screen check: rule row and fully-wrapped `X` rows both end at column 94. `pytest`: 45 passed. All §9 acceptance boxes satisfied except the manual wide-terminal eyeball.
+
+### If this regresses
+
+The load-bearing invariant: `#editor` must have **zero right padding/border**, and the 5-col right text inset must live entirely in `wrap_width`. If a future Textual version changes how `wrap_width` composes (e.g. stops subtracting the cursor cell), re-derive `EXTRA_RIGHT_MARGIN` as `5 − (what the base property already reserves to the right of text)`.

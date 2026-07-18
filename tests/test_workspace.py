@@ -86,6 +86,20 @@ def test_close_all() -> None:
     assert ws.active.text == ""
 
 
+def test_close_others_keeps_active() -> None:
+    ws = Workspace()
+    # indices: 0="", 1="a", 2="keep", 3="c"
+    ws.new_document(text="a")
+    ws.new_document(text="keep")
+    ws.new_document(text="c")
+    ws.set_active(2)
+    assert ws.active.text == "keep"
+    ws.close_others()
+    assert ws.count == 1
+    assert ws.active.text == "keep"
+    assert ws.active_index == 0
+
+
 def test_set_active_bounds() -> None:
     ws = Workspace()
     ws.new_document()

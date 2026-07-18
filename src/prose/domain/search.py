@@ -56,6 +56,52 @@ def find_prev(
     return matches[-1]
 
 
+def step_find(
+    text: str,
+    query: str,
+    *,
+    direction: str,
+    cursor: int = 0,
+    current_start: int | None = None,
+    case_sensitive: bool = False,
+) -> Optional[Match]:
+    """Step to the next/previous match in document order, wrapping at ends.
+
+    If ``current_start`` is the start index of the focused match, step from
+    that hit. Otherwise land on the first match at/after ``cursor`` (next)
+    or the last match before ``cursor`` (prev).
+    """
+    if direction not in ("next", "prev"):
+        raise ValueError(f"direction must be 'next' or 'prev', got {direction!r}")
+    matches = find_all(text, query, case_sensitive=case_sensitive)
+    if not matches:
+        return None
+
+    current_idx: int | None = None
+    if current_start is not None:
+        for i, m in enumerate(matches):
+            if m.start == current_start:
+                current_idx = i
+                break
+
+    n = len(matches)
+    if current_idx is not None:
+        if direction == "next":
+            return matches[(current_idx + 1) % n]
+        return matches[(current_idx - 1) % n]
+
+    if direction == "next":
+        for m in matches:
+            if m.start >= cursor:
+                return m
+        return matches[0]
+
+    for m in reversed(matches):
+        if m.start < cursor:
+            return m
+    return matches[-1]
+
+
 def find_all(
     text: str,
     query: str,

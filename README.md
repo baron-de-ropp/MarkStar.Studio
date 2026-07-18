@@ -32,7 +32,13 @@ pytest
 | **Ctrl+Shift+D** | Duplicate line |
 | Ctrl+S | Save |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
-| Ctrl+F / Ctrl+H | Find / Replace bar (Enter next, Shift+Enter prev, Esc close) |
+| Ctrl+F / Ctrl+R | Find / Replace (Enter next or replace-one; Ctrl+Enter prev; Ctrl+Alt+R all) |
+| Ctrl+O | Open path (prompt) |
+| Ctrl+S / Ctrl+Shift+S | Save / Save As (overwrite confirm if file exists) |
+| Ctrl+Alt+S | Save all dirty tabs |
+| Ctrl+W | Close active tab |
+| Esc | Open / close menu (F9 still works) |
+| Esc → File → Close Others / Close All | Menu only (no key — terminals steal the usual chords) |
 | Ctrl+G | Go to line |
 | Ctrl+A | Select all |
 | Alt+Z | Toggle soft wrap |

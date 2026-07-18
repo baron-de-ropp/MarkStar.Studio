@@ -102,6 +102,15 @@ class Workspace:
         self._active = 0
         return self.active
 
+    def close_others(self) -> Document:
+        """Close every tab except the active one. No-op if only one tab."""
+        if len(self._docs) == 1:
+            return self.active
+        keep = self._docs[self._active]
+        self._docs = [keep]
+        self._active = 0
+        return self.active
+
     def dirty_documents(self) -> list[Document]:
         """Open buffers with unsaved changes."""
         return [doc for doc in self._docs if doc.dirty]

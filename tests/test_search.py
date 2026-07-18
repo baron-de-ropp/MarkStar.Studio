@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from prose.domain.document import Document
-from prose.domain.search import find_all, find_next, find_prev, replace_all, replace_match
+from prose.domain.search import (
+    find_all,
+    find_next,
+    find_prev,
+    replace_all,
+    replace_match,
+    step_find,
+)
 
 
 def test_find_next_basic() -> None:
@@ -31,6 +38,24 @@ def test_find_prev() -> None:
     m2 = find_prev(text, "one", start=8)
     assert m2 is not None
     assert m2.start == 0
+
+
+def test_step_find_next_and_prev_cycle() -> None:
+    text = "aa x aa y aa"
+    # starts: 0, 5, 10
+    first = step_find(text, "aa", direction="next", cursor=0, current_start=None)
+    assert first is not None and first.start == 0
+    second = step_find(text, "aa", direction="next", current_start=0)
+    assert second is not None and second.start == 5
+    third = step_find(text, "aa", direction="next", current_start=5)
+    assert third is not None and third.start == 10
+    wrap = step_find(text, "aa", direction="next", current_start=10)
+    assert wrap is not None and wrap.start == 0
+
+    back = step_find(text, "aa", direction="prev", current_start=5)
+    assert back is not None and back.start == 0
+    back_wrap = step_find(text, "aa", direction="prev", current_start=0)
+    assert back_wrap is not None and back_wrap.start == 10
 
 
 def test_find_case_insensitive() -> None:
