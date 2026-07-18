@@ -653,9 +653,21 @@ class ProseApp(App[None]):
             path = path.with_suffix(".md")
         return path
 
-    def cmd_quit(self) -> None:
+    def action_quit(self) -> None:
+        """Override Textual's default action_quit (Ctrl+Q) so we can confirm dirty tabs.
+
+        Textual binds ctrl+q → ``quit`` → ``App.action_quit`` which exits immediately.
+        That bypassed ``cmd_quit`` / the command registry.
+        """
+        self.cmd_quit()
+
+    def _unsaved_documents(self) -> list[Document]:
+        """Dirty workspace buffers, after syncing the focused editor into the active doc."""
         self._sync_document_from_editor()
-        dirty = self.workspace.dirty_documents()
+        return self.workspace.dirty_documents()
+
+    def cmd_quit(self) -> None:
+        dirty = self._unsaved_documents()
         if not dirty:
             self.exit()
             return
@@ -663,11 +675,13 @@ class ProseApp(App[None]):
         names: list[str] = []
         for doc in dirty:
             names.append(doc.path.name if doc.path else "Untitled")
-        # Keep message short for the modal
         if len(names) == 1:
-            detail = f"“{names[0]}” has unsaved changes."
+            detail = f'"{names[0]}" has unsaved changes.'
         else:
-            detail = f"{len(names)} tabs have unsaved changes ({', '.join(names[:4])}{'…' if len(names) > 4 else ''})."
+            listed = ", ".join(names[:4])
+            if len(names) > 4:
+                listed += "…"
+            detail = f"{len(names)} tabs have unsaved changes ({listed})."
 
         async def _confirm() -> None:
             ok = await self.push_screen_wait(
