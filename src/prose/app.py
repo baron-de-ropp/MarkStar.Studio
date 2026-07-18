@@ -126,6 +126,7 @@ class ProseApp(App[None]):
         height: 1;
         padding: 0 5;
         background: $background;
+        /* Base color = tab-label dim; blue applied only to key spans in markup */
         color: $text-muted;
     }
     """
@@ -334,15 +335,14 @@ class ProseApp(App[None]):
             pass
 
     def _refresh_support_hints(self) -> None:
-        """Blue keys + dim labels, separated by '  |  '."""
+        """Blue keys + dim labels (labels/pipes inherit $text-muted from CSS)."""
         parts: list[str] = []
         for key, desc in self._SUPPORT_HINTS:
-            # Dim grey ≈ VS Code description / tab-label mute (not theme token in markup)
-            parts.append(f"[#007ACC]{key}[/] [#858585]{desc}[/]")
+            # Only the key is colored; description + spaces use widget $text-muted
+            # (same as tab filename). Explicit hex on labels was fighting theme/CSS.
+            parts.append(f"[#007ACC]{key}[/] {desc}")
         try:
-            # Separators also dim
-            sep = "  [#555555]|[/]  "
-            self.query_one("#support-hints", Static).update(sep.join(parts))
+            self.query_one("#support-hints", Static).update("  |  ".join(parts))
         except Exception:
             pass
 
