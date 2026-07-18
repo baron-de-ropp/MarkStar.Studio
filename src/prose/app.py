@@ -9,7 +9,7 @@ from pathlib import Path
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label, Static, TextArea
@@ -102,27 +102,21 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    /* Bottom chrome: rule · pad · hints · pad */
+    /* Bottom chrome: rule · pad · hints+metrics · pad */
     #bottom-chrome {
         height: auto;
         background: $background;
         dock: bottom;
     }
 
-    /* Rule spans prose column only (left margin + max measure), not full terminal */
+    /* Drawn with ─ chars so it stays visible; width set in code */
     #status-rule {
         height: 1;
         margin-left: 5;
         width: 120;
+        color: $foreground 25%;
         background: $background;
-        border-bottom: solid $foreground 10%;
-    }
-
-    #status {
-        height: 1;
-        padding: 0 5;
-        color: $text-muted;
-        background: $background;
+        text-style: none;
     }
 
     #support-pad-top, #support-pad-bottom {
@@ -130,12 +124,27 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    #support-hints {
+    #support-row {
         height: 1;
-        padding: 0 5;
+        width: 100%;
         background: $background;
-        /* Base color = tab-label dim; blue applied only to key spans in markup */
+        padding: 0 1 0 5;
+    }
+
+    #support-hints {
+        width: 1fr;
+        height: 1;
+        background: $background;
         color: $text-muted;
+    }
+
+    #support-metrics {
+        width: auto;
+        height: 1;
+        background: $background;
+        color: $text-muted;
+        text-align: right;
+        padding: 0 1 0 2;
     }
     """
 
@@ -253,9 +262,10 @@ class ProseApp(App[None]):
             yield TextArea(id="editor")
             with Vertical(id="bottom-chrome"):
                 yield Static("", id="status-rule")
-                yield Static("", id="status")
                 yield Static("", id="support-pad-top")
-                yield Static("", id="support-hints")
+                with Horizontal(id="support-row"):
+                    yield Static("", id="support-hints")
+                    yield Static("", id="support-metrics")
                 yield Static("", id="support-pad-bottom")
 
     # Support-strip shortcuts (key label shown in blue, description dim).
@@ -323,6 +333,8 @@ class ProseApp(App[None]):
         width = min(max_w, available)
         rule.styles.margin = (0, 0, 0, left)
         rule.styles.width = width
+        # Use box-drawing chars (border on empty Static is easy to miss)
+        rule.update("─" * width)
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
@@ -334,6 +346,10 @@ class ProseApp(App[None]):
         self.document.set_text(new_text)
         self._refresh_status()
 
+    @on(TextArea.SelectionChanged)
+    def _on_selection_changed(self, event: TextArea.SelectionChanged) -> None:
+        self._refresh_metrics()
+
     def _sync_document_from_editor(self) -> None:
         editor = self.query_one("#editor", TextArea)
         if editor.text != self.document.text:
@@ -344,6 +360,7 @@ class ProseApp(App[None]):
         self._syncing = True
         editor.load_text(self.document.text)
         self._syncing = False
+        self._refresh_metrics()
 
     def _cursor_index(self) -> int:
         editor = self.query_one("#editor", TextArea)
@@ -377,8 +394,29 @@ class ProseApp(App[None]):
         except Exception:
             pass
 
+    def _cursor_line_col(self) -> tuple[int, int]:
+        """1-based line and column of the caret."""
+        try:
+            editor = self.query_one("#editor", TextArea)
+            row, col = editor.cursor_location
+            return row + 1, col + 1
+        except Exception:
+            return 1, 1
+
+    def _refresh_metrics(self) -> None:
+        """Right-aligned: Ln:Col (volatile first), words, Markdown flavor."""
+        line, col = self._cursor_line_col()
+        words = self.document.word_count()
+        # Fixed-ish order: line/col changes often — keep it leftmost of the group
+        # so word count and flavor don't jump as the caret moves.
+        text = f"Ln {line}, Col {col}  │  {words} words  │  CommonMark"
+        try:
+            self.query_one("#support-metrics", Static).update(text)
+        except Exception:
+            pass
+
     def _refresh_status(self) -> None:
-        """Tab label, metrics strip, and terminal title."""
+        """Tab label, support metrics, and terminal title."""
         name = self.document.path.name if self.document.path else "Untitled"
         dirty = " •" if self.document.dirty else ""
         label = f"{name}{dirty}"
@@ -388,9 +426,7 @@ class ProseApp(App[None]):
         except Exception:
             pass
 
-        status = self.query_one("#status", Static)
-        words = self.document.word_count()
-        status.update(f"{words} words  │  CommonMark  │  vscode-dark")
+        self._refresh_metrics()
         self.title = label
 
     def action_run_command(self, command_id: str) -> None:
