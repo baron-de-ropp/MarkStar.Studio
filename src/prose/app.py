@@ -89,11 +89,13 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    /* Outer prose margin (design default ~5 cols; full config later) */
+    /* Content column: 5 left + text + 1 scrollbar at window edge.
+       Right "margin" for rules/metrics is 1 col (scrollbar), not a second pad
+       that would push the scrollbar inward. */
     #tab-strip {
         height: auto;
         background: $background;
-        padding: 0 5;
+        padding: 0 1 0 5;
     }
 
     #tab-pad-top {
@@ -118,23 +120,33 @@ class ProseApp(App[None]):
         background: $background;
     }
 
-    /* Seamless prose surface — same 5-col side inset as tab/rules.
-       Scrollbar stays on the widget edge; text content is inset so it does not
-       run into the gutter (matches header/footer rule margins). */
+    /* Editor row: 5-col left gutter + TextArea filling to the window edge
+       so the thin scrollbar is flush right (padding-right would inset it). */
+    #editor-row {
+        height: 1fr;
+        width: 100%;
+        background: $background;
+    }
+
+    #editor-left-pad {
+        width: 5;
+        height: 1fr;
+        background: $background;
+    }
+
     #editor {
+        width: 1fr;
         height: 1fr;
         border: none;
         margin: 0;
-        padding: 0 5;
+        padding: 0;
         background: $background;
-        /* Thin scrollbar (1 cell), muted like tab filename */
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
         scrollbar-gutter: auto;
         scrollbar-background: $background;
         scrollbar-background-hover: $background;
         scrollbar-background-active: $background;
-        /* Nearly invisible until hover/drag */
         scrollbar-color: $text-muted 12%;
         scrollbar-color-hover: $text-muted 45%;
         scrollbar-color-active: $text-muted 55%;
@@ -157,12 +169,12 @@ class ProseApp(App[None]):
         dock: bottom;
     }
 
-    /* Same side inset as #tab-strip (padding 0 5) — not flush to the scrollbar */
+    /* Match tab-strip: 5 left, 1 right (scrollbar column) */
     #status-rule-row {
         height: 1;
         width: 100%;
         background: $background;
-        padding: 0 5;
+        padding: 0 1 0 5;
     }
 
     #status-rule {
@@ -182,8 +194,8 @@ class ProseApp(App[None]):
         height: 1;
         width: 100%;
         background: $background;
-        /* Same 5-col inset as tab strip / rules / editor text */
-        padding: 0 5;
+        /* 5 left, 1 right — metrics align with prose; scrollbar stays at edge */
+        padding: 0 1 0 5;
     }
 
     #support-hints {
@@ -339,7 +351,9 @@ class ProseApp(App[None]):
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
-            yield ProseTextArea(id="editor")
+            with Horizontal(id="editor-row"):
+                yield Static("", id="editor-left-pad")
+                yield ProseTextArea(id="editor")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
                     yield Static("", id="status-rule")
