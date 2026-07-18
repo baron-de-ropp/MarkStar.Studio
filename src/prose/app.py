@@ -12,7 +12,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Label, Static, TextArea
+from textual.widgets import Footer, Input, Label, Static, TextArea
 from textual.widgets.text_area import Selection
 
 from prose import __version__
@@ -39,6 +39,34 @@ class ProseApp(App[None]):
     #main {
         height: 1fr;
         background: $background;
+    }
+
+    /* Tab strip (P1: single file name; multi-tabs later) */
+    #tab-strip {
+        height: auto;
+        background: $background;
+        padding: 0 1;
+    }
+
+    #tab-pad-top, #tab-pad-bottom {
+        height: 1;
+        background: $background;
+    }
+
+    #tab-label {
+        height: 1;
+        color: $text;
+        text-style: bold;
+        background: $background;
+        padding: 0 1;
+    }
+
+    #tab-rule {
+        height: 1;
+        background: $background;
+        border-bottom: solid $foreground 10%;
+        margin: 0;
+        padding: 0;
     }
 
     /* Seamless prose surface — no frame, same color as the rest of the app */
@@ -70,16 +98,6 @@ class ProseApp(App[None]):
 
     Footer {
         background: $background;
-    }
-
-    Header {
-        background: $background;
-    }
-
-    /* Hide Textual's default command-palette orb (⭘) — palette is disabled */
-    HeaderIcon {
-        display: none;
-        width: 0;
     }
     """
 
@@ -180,8 +198,13 @@ class ProseApp(App[None]):
         add("send_feedback", "Send Feedback…", "Help", self.cmd_send_feedback)
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
         with Vertical(id="main"):
+            # blank · filename · blank · thin rule · (find) · editor
+            with Vertical(id="tab-strip"):
+                yield Static("", id="tab-pad-top")
+                yield Static("Untitled", id="tab-label")
+                yield Static("", id="tab-pad-bottom")
+                yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
             yield TextArea(id="editor")
             yield Static("", id="status")
@@ -222,12 +245,8 @@ class ProseApp(App[None]):
             self._syncing = True
             editor.load_text(self.document.text)
             self._syncing = False
-            self.title = self._path_arg.name
         elif self._path_arg is not None:
             self.document.path = self._path_arg
-            self.title = self._path_arg.name
-        else:
-            self.title = "Untitled"
         editor.focus()
         self._refresh_status()
 
@@ -273,20 +292,22 @@ class ProseApp(App[None]):
             pass
 
     def _refresh_status(self) -> None:
-        """Document metrics strip (above Footer). Shortcuts live in the Footer."""
-        status = self.query_one("#status", Static)
+        """Tab label, metrics strip, and terminal title."""
         name = self.document.path.name if self.document.path else "Untitled"
         dirty = " •" if self.document.dirty else ""
+        label = f"{name}{dirty}"
+
+        try:
+            self.query_one("#tab-label", Static).update(f" {label}")
+        except Exception:
+            pass
+
+        status = self.query_one("#status", Static)
         words = self.document.word_count()
-        # Metrics on the right-ish feel: name left, counts + dialect after pipes
         status.update(
-            f"{name}{dirty}  │  {words} words  │  CommonMark  │  "
-            f"press F9 for menu"
+            f"{words} words  │  CommonMark  │  press F9 for menu"
         )
-        if self.document.path:
-            self.title = f"{self.document.path.name}{dirty}"
-        else:
-            self.title = f"Untitled{dirty}"
+        self.title = label
 
     def action_run_command(self, command_id: str) -> None:
         self.registry.execute(command_id)
