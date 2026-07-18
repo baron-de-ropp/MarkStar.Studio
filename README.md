@@ -24,7 +24,7 @@ pytest
 | Key | Action |
 |-----|--------|
 | **F9** | Open the **menu ribbon** (File Edit View…); ←/→ switch, Enter run, Esc close |
-| **Ctrl+Shift+PgDn** / **Ctrl+Shift+PgUp** | Next / previous tab |
+| **Ctrl+Shift+.** / **Ctrl+Shift+,** | Next / previous tab (`>` / `<` keys; across open files) |
 | **Ctrl+N** / **Ctrl+W** | New tab / close tab |
 | **Ctrl+←/→** | Word hop |
 | **Ctrl+↑/↓** | Paragraph hop |
