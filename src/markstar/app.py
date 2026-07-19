@@ -14,9 +14,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
-from textual.screen import ModalScreen
 from textual import events
-from textual.widgets import Input, Label, Static, TextArea
+from textual.widgets import Static, TextArea
 from textual.widgets.text_area import Selection
 
 from markstar import __version__
@@ -52,6 +51,7 @@ from markstar.domain.markdown import (
 )
 from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
+from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
@@ -1330,7 +1330,7 @@ class MarkStarApp(App[None]):
 
     async def _open_file_async(self) -> None:
         raw = await self.push_screen_wait(
-            _PathPrompt(
+            PathPrompt(
                 "Open — enter a file path",
                 initial=str(Path.cwd()) + "/",
                 hint="Enter open · Esc cancel · ~ allowed · missing path creates empty tab",
@@ -1391,7 +1391,7 @@ class MarkStarApp(App[None]):
             self.notify(f'"{root.name}" is a file, not a folder', severity="warning")
         else:
             ok = await self.push_screen_wait(
-                _ConfirmDialog(
+                ConfirmDialog(
                     title="Create new project?",
                     message=f'No folder at "{root}".\n'
                     "Create it as a new project folder?",
@@ -1413,7 +1413,7 @@ class MarkStarApp(App[None]):
 
     async def _open_folder_async(self) -> None:
         raw = await self.push_screen_wait(
-            _PathPrompt(
+            PathPrompt(
                 "Open Folder — enter a directory path",
                 initial=str(self._project_root()) + "/",
                 hint="Enter open · Esc cancel · ~ allowed",
@@ -1483,7 +1483,7 @@ class MarkStarApp(App[None]):
 
         async def _confirm() -> None:
             ok = await self.push_screen_wait(
-                _ConfirmDialog(
+                ConfirmDialog(
                     title="Close other tabs?",
                     message=detail + "\nClose others and discard their unsaved work?",
                     yes_label="close others",
@@ -1523,7 +1523,7 @@ class MarkStarApp(App[None]):
 
         async def _confirm() -> None:
             ok = await self.push_screen_wait(
-                _ConfirmDialog(
+                ConfirmDialog(
                     title="Close all tabs?",
                     message=detail + "\nClose all and discard unsaved work?",
                     yes_label="close all",
@@ -1676,7 +1676,7 @@ class MarkStarApp(App[None]):
     async def _prompt_and_save_async(self, *, title: str, initial: str = "") -> bool:
         """Ask for a path, confirm overwrite if needed, save. True if written."""
         raw = await self.push_screen_wait(
-            _PathPrompt(
+            PathPrompt(
                 title,
                 initial=initial or str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
                 hint="Enter path · Enter save · Esc cancel · ~ allowed",
@@ -1697,7 +1697,7 @@ class MarkStarApp(App[None]):
             )
             if not same:
                 ok = await self.push_screen_wait(
-                    _ConfirmDialog(
+                    ConfirmDialog(
                         title="Overwrite existing file?",
                         message=(
                             f'"{path}" already exists.\n'
@@ -1758,7 +1758,7 @@ class MarkStarApp(App[None]):
 
         async def _confirm() -> None:
             ok = await self.push_screen_wait(
-                _ConfirmDialog(
+                ConfirmDialog(
                     title="Quit MarkStar?",
                     message=detail + "\nQuit anyway and discard unsaved work?",
                     yes_label="quit",
@@ -2053,7 +2053,7 @@ class MarkStarApp(App[None]):
         else:
             default = str(Path.cwd() / f"compiled{_DEFAULT_SUFFIX}")
         raw = await self.push_screen_wait(
-            _PathPrompt(
+            PathPrompt(
                 "Compile — where should the combined Markdown go?",
                 initial=default,
                 hint="Enter save · Esc cancel · ~ allowed",
@@ -2327,7 +2327,7 @@ class MarkStarApp(App[None]):
         """If a sidecar is newer than ``path``, offer to restore the unsaved work."""
         if not self.prefs.autosave or not sidecar_is_newer(path):
             return
-        choice = await self.push_screen_wait(_RestoreDialog(path.name))
+        choice = await self.push_screen_wait(RestoreDialog(path.name))
         if choice == "discard":
             delete_sidecar(path)
             return
@@ -2766,201 +2766,6 @@ class MarkStarApp(App[None]):
         self._last_find_end = match.end
         self._select_range(match.start, match.end)
         self._update_find_count()
-
-
-class _PathPrompt(ModalScreen[str | None]):
-    """Modal path entry for Save / Save As (OpenCode-soft panel)."""
-
-    CSS = """
-    _PathPrompt {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.55);
-    }
-    #path-panel {
-        width: 72;
-        max-width: 90%;
-        height: auto;
-        background: $boost;
-        border: tall $accent;
-        padding: 1 2;
-    }
-    #path-title {
-        text-style: bold;
-        color: $text;
-        padding-bottom: 1;
-    }
-    #path-hint {
-        color: $text-muted;
-        padding-top: 1;
-    }
-    #path-input {
-        width: 100%;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", show=False, priority=True),
-        Binding("enter", "submit", show=False, priority=True),
-    ]
-
-    def __init__(self, title: str, *, initial: str = "", hint: str = "") -> None:
-        super().__init__()
-        self._title = title
-        self._initial = initial
-        self._hint = hint
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="path-panel"):
-            yield Label(self._title, id="path-title")
-            yield Input(value=self._initial, placeholder="/path/to/file.md", id="path-input")
-            yield Label(self._hint or "Enter · save   Esc · cancel", id="path-hint")
-
-    def on_mount(self) -> None:
-        inp = self.query_one("#path-input", Input)
-        inp.focus()
-        # Select basename so typing replaces the default name quickly
-        if self._initial:
-            try:
-                text = self._initial
-                slash = max(text.rfind("/"), text.rfind("\\"))
-                start = slash + 1 if slash >= 0 else 0
-                inp.cursor_position = len(text)
-                # Textual Input selection API varies; best-effort
-                if hasattr(inp, "action_select_all"):
-                    # Prefer selecting only the filename portion when possible
-                    pass
-            except Exception:
-                pass
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def action_submit(self) -> None:
-        self.dismiss(self.query_one("#path-input", Input).value)
-
-
-class _ConfirmDialog(ModalScreen[bool]):
-    """Yes/No confirm. True = yes, False = no/cancel."""
-
-    CSS = """
-    _ConfirmDialog {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.55);
-    }
-    #confirm-panel {
-        width: 64;
-        max-width: 90%;
-        height: auto;
-        background: $boost;
-        border: tall $accent;
-        padding: 1 2;
-    }
-    #confirm-title {
-        text-style: bold;
-        color: $text;
-        padding-bottom: 1;
-    }
-    #confirm-message {
-        color: $text-muted;
-        padding-bottom: 1;
-    }
-    #confirm-hint {
-        color: $text-muted;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", show=False, priority=True),
-        Binding("n", "cancel", show=False, priority=True),
-        Binding("enter", "confirm", show=False, priority=True),
-        Binding("y", "confirm", show=False, priority=True),
-    ]
-
-    def __init__(
-        self,
-        *,
-        title: str,
-        message: str,
-        yes_label: str = "yes",
-        no_label: str = "no",
-    ) -> None:
-        super().__init__()
-        self._title = title
-        self._message = message
-        self._yes_label = yes_label
-        self._no_label = no_label
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="confirm-panel"):
-            yield Label(self._title, id="confirm-title")
-            yield Label(self._message, id="confirm-message")
-            hk = token(self.app, "hint-key")
-            yield Label(
-                f"[{hk}]Y[/]/Enter {self._yes_label}  ·  "
-                f"[{hk}]N[/]/Esc {self._no_label}",
-                id="confirm-hint",
-            )
-
-    def action_cancel(self) -> None:
-        self.dismiss(False)
-
-    def action_confirm(self) -> None:
-        self.dismiss(True)
-
-
-class _RestoreDialog(ModalScreen[str]):
-    """Recover unsaved autosave work: Restore / Discard (Esc = decide later)."""
-
-    CSS = """
-    _RestoreDialog {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.55);
-    }
-    #restore-panel {
-        width: 66;
-        max-width: 90%;
-        height: auto;
-        background: $boost;
-        border: tall $accent;
-        padding: 1 2;
-    }
-    #restore-title { text-style: bold; color: $text; padding-bottom: 1; }
-    #restore-message { color: $text-muted; padding-bottom: 1; }
-    #restore-hint { color: $text-muted; }
-    """
-
-    BINDINGS = [
-        Binding("escape", "later", show=False, priority=True),
-        Binding("r", "restore", show=False, priority=True),
-        Binding("d", "discard", show=False, priority=True),
-    ]
-
-    def __init__(self, name: str) -> None:
-        super().__init__()
-        self._name = name
-
-    def compose(self) -> ComposeResult:
-        hk = token(self.app, "hint-key")
-        with Vertical(id="restore-panel"):
-            yield Label("Unsaved changes recovered", id="restore-title")
-            yield Label(
-                f'"{self._name}" has newer unsaved changes from a previous '
-                "session (an autosave). Restore them?",
-                id="restore-message",
-            )
-            yield Label(
-                f"[{hk}]R[/] restore  ·  [{hk}]D[/] discard  ·  [{hk}]Esc[/] decide later",
-                id="restore-hint",
-            )
-
-    def action_restore(self) -> None:
-        self.dismiss("restore")
-
-    def action_discard(self) -> None:
-        self.dismiss("discard")
-
-    def action_later(self) -> None:
-        self.dismiss("later")
 
 
 def _terminal_renders_pointer_shapes() -> bool:
