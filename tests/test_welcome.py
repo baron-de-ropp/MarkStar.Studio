@@ -48,6 +48,47 @@ def test_choosing_folder_sets_project_root(tmp_path) -> None:
     assert root == tmp_path
 
 
+def test_recent_projects_recorded_dedup_and_capped(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "cfg.toml"))
+    dirs = [tmp_path / f"p{i}" for i in range(7)]
+    for d in dirs:
+        d.mkdir()
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            for d in dirs:
+                app._set_project_root(d)
+            app._set_project_root(dirs[6])  # re-open newest (dedup)
+            await pilot.pause()
+            return list(app.prefs.recent_projects)
+
+    recents = _run(go())
+    assert len(recents) == 5  # capped
+    assert recents[0] == str(dirs[6].resolve())  # most recent first
+    assert recents.count(str(dirs[6].resolve())) == 1  # deduped
+
+    from markstar.config import Preferences  # persisted + reloads
+
+    assert Preferences.load().recent_projects == recents
+
+
+def test_file_launch_opens_editor_and_panel_at_folder(tmp_path) -> None:
+    (tmp_path / "chapter.md").write_text("# Chapter")
+
+    async def go():
+        app = MarkStarApp(path=tmp_path / "chapter.md")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panel = app.query_one("#project-panel", ProjectPanel)
+            return app.document.path, panel.is_open, app._project_root()
+
+    doc_path, panel_open, root = _run(go())
+    assert doc_path == tmp_path / "chapter.md"
+    assert panel_open is True
+    assert root == tmp_path
+
+
 def test_skipping_welcome_leaves_panel_closed() -> None:
     async def go():
         app = MarkStarApp()

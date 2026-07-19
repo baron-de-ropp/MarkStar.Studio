@@ -6,6 +6,7 @@ from Help > Welcome. Returns the chosen project folder (or None to skip).
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from textual import events
@@ -13,7 +14,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, Static
+from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
 
 from markstar.ui.themes import token
 
@@ -76,18 +78,37 @@ class WelcomeScreen(ModalScreen):
     #welcome-folder:focus {
         border: round $accent;
     }
-    #welcome-hints, #welcome-tip {
+    #recent-label {
         width: 100%;
         content-align: center middle;
         color: $text-muted;
+        padding: 2 0 0 0;
     }
-    #welcome-hints { padding: 1 0 0 0; }
-    #welcome-tip { padding: 1 0 0 0; }
+    #recent-list {
+        width: 68;
+        max-width: 100%;
+        max-height: 7;
+        border: none;
+        background: $surface;
+        color: $text-muted;
+        padding: 0 1;
+    }
+    #recent-list > .option-list--option-highlighted {
+        background: $accent 45%;
+        color: $text;
+    }
+    #welcome-hints {
+        width: 100%;
+        content-align: center middle;
+        color: $text-muted;
+        padding: 2 0 0 0;
+    }
     #welcome-brand {
         dock: bottom;
         width: 100%;
+        content-align: center middle;
         color: $text-muted;
-        padding: 0 2 0 2;
+        padding: 0 0 0 0;
     }
     """
 
@@ -95,10 +116,13 @@ class WelcomeScreen(ModalScreen):
         Binding("escape", "skip", "Skip", show=False, priority=True),
     ]
 
-    def __init__(self, default_dir: Path, version: str) -> None:
+    def __init__(
+        self, default_dir: Path, version: str, recent: list[Path] | None = None
+    ) -> None:
         super().__init__()
         self._default_dir = default_dir
         self._version = version
+        self._recent = recent or []
 
     def _logo_markup(self) -> str:
         mark = token(self.app, "md-heading", "#569CD6")  # "MARK" — heading color
@@ -121,24 +145,47 @@ class WelcomeScreen(ModalScreen):
                 placeholder="~/path/to/your/project",
                 id="welcome-folder",
             )
+            if self._recent:
+                yield Static("Recent projects", id="recent-label")
+                options = [
+                    Option(self._recent_label(p), id=str(p)) for p in self._recent
+                ]
+                yield OptionList(*options, id="recent-list")
+            hk = token(self.app, "hint-key", "#3794FF")
             yield Static(
-                "[b]Enter[/] open folder   [b]Ctrl+N[/] new file   [b]Esc[/] skip",
+                f"[{hk}]Enter[/] open folder    "
+                f"[{hk}]Ctrl+N[/] new file    "
+                f"[{hk}]Esc[/] skip",
                 id="welcome-hints",
             )
-            yield Static(
-                "[dim]Tip: press [b]Esc[/] any time to summon the menu.[/]",
-                id="welcome-tip",
-            )
+        year = datetime.now().year
         yield Static(
-            f"markstar.studio{'  ·  v' + self._version:>40}", id="welcome-brand"
+            f"© {year} Ryan Lewis Baron de Ropp    ·    "
+            f"markstar.studio    ·    v{self._version}",
+            id="welcome-brand",
         )
 
     def on_mount(self) -> None:
         self.query_one("#welcome-folder", Input).focus()
 
+    def _recent_label(self, path: Path) -> str:
+        name = path.name or str(path)
+        try:
+            parent = str(path.parent)
+        except Exception:
+            parent = ""
+        return f"{name}   [dim]{parent}[/]"
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
         self._confirm(event.value)
+
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
+        event.stop()
+        if event.option.id:
+            self.dismiss(Path(event.option.id))
 
     def action_skip(self) -> None:
         self.dismiss(None)

@@ -557,6 +557,31 @@ class MarkStarApp(App[None]):
                 pass
         return Path.cwd()
 
+    def _record_recent_project(self, root: Path) -> None:
+        """Push a folder to the front of the recent-projects list (max 5)."""
+        try:
+            key = str(Path(root).expanduser().resolve())
+        except Exception:
+            return
+        recents = [x for x in self.prefs.recent_projects if x != key]
+        recents.insert(0, key)
+        self.prefs.recent_projects = recents[:5]
+        self.prefs.save()
+
+    def _set_project_root(self, root: Path, *, focus_tree: bool = True) -> None:
+        """Point the panel at ``root``, open it, and record it as recent."""
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+        except Exception:
+            return
+        self._path_arg = root
+        panel.set_root(root)
+        panel.open()
+        if focus_tree:
+            panel.focus_tree()
+        self._record_recent_project(root)
+        self.notify(f"Project: {root.name or root}")
+
     def _build_commands(self) -> None:
         r = self.registry
 
@@ -584,6 +609,7 @@ class MarkStarApp(App[None]):
         add("new_file", "New File", "File", self.cmd_new_file, "ctrl+n")
         add("open_file", "Open File…", "File", self.cmd_open_file, "ctrl+o")
         add("open_folder", "Open Folder…", "File", self.cmd_open_folder)  # menu
+        add("recent_projects", "Recent Projects…", "File", self.cmd_welcome)  # menu
         add("close", "Close", "File", self.cmd_close, "ctrl+w")
         add("close_others", "Close Others", "File", self.cmd_close_others)  # menu only
         add("close_all", "Close All", "File", self.cmd_close_all)  # menu only
@@ -723,20 +749,22 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
 
+        launch_root: Path | None = None  # folder to open the panel at
+        launch_focus_tree = False
         if self._path_arg is not None:
             try:
                 is_dir = self._path_arg.is_dir()
             except OSError:
                 is_dir = False
             if is_dir:
-                # Launched with a folder → open the project panel at that root,
-                # leaving an empty buffer to write in.
-                try:
-                    self.query_one("#project-panel", ProjectPanel).open()
-                except Exception:
-                    pass
+                # `markstar <folder>` → project root = that folder; browse it.
+                launch_root = self._path_arg
+                launch_focus_tree = True
             elif self._path_arg.exists():
+                # `markstar <folder>/file.md` → open the file AND show its folder
+                # tree; focus stays in the editor.
                 self.workspace.open_path(self._path_arg)
+                launch_root = self._path_arg.parent
             else:
                 self.workspace.active.path = self._path_arg
         self._load_active_into_editor()
@@ -744,9 +772,10 @@ class MarkStarApp(App[None]):
         self._refresh_status()
         self._update_prose_layout()
 
-        # Fresh launch (no file/folder) → greet with the welcome screen.
-        # Skip under headless test runs (no interactive screen to drive).
-        if self._path_arg is None and not self.is_headless:
+        if launch_root is not None:
+            self._set_project_root(launch_root, focus_tree=launch_focus_tree)
+        elif self._path_arg is None and not self.is_headless:
+            # Fresh launch (no arg) → welcome screen. Skipped under headless tests.
             self.call_after_refresh(lambda: self.run_worker(self._show_welcome()))
 
     def on_resize(self, event) -> None:
@@ -1157,20 +1186,12 @@ class MarkStarApp(App[None]):
         self.run_worker(self._show_welcome())
 
     async def _show_welcome(self) -> None:
+        recent = [Path(p) for p in self.prefs.recent_projects]
         root = await self.push_screen_wait(
-            WelcomeScreen(self._project_root(), __version__)
+            WelcomeScreen(self._project_root(), __version__, recent)
         )
-        if root is None:
-            return
-        try:
-            panel = self.query_one("#project-panel", ProjectPanel)
-        except Exception:
-            return
-        self._path_arg = root  # so _project_root() reflects the choice
-        panel.set_root(root)
-        panel.open()
-        panel.focus_tree()
-        self.notify(f"Project: {root.name or root}")
+        if root is not None:
+            self._set_project_root(root)
 
     def cmd_open_folder(self) -> None:
         """Prompt for a folder and point the project panel at it (opens it)."""
@@ -1193,14 +1214,7 @@ class MarkStarApp(App[None]):
         if not path.is_dir():
             self.notify(f"Not a folder: {path}", severity="warning")
             return
-        try:
-            panel = self.query_one("#project-panel", ProjectPanel)
-        except Exception:
-            return
-        panel.set_root(path)
-        panel.open()
-        panel.focus_tree()
-        self.notify(f"Project: {path.name or path}")
+        self._set_project_root(path)
 
     @on(WriterTree.FileSelected)
     def _on_tree_file_selected(self, event: WriterTree.FileSelected) -> None:
