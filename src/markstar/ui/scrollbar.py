@@ -16,9 +16,12 @@ from rich.style import Style
 from textual.color import Color
 from textual.scrollbar import ScrollBar, ScrollBarRender
 
-# Right one-eighth block: a thin vertical line flush to the right edge, where the
-# vertical scrollbar sits. Consecutive cells join into one continuous slim line.
-_THUMB = "▕"
+# Thin thumb glyphs. Vertical: a right one-eighth block hugging the right edge.
+# Horizontal: the box-drawing light horizontal — a true 1px line that connects
+# seamlessly across cells (thinner than the ▁ eighth-block, which is chunky
+# because a cell is ~2x taller than wide).
+_THUMB_V = "▕"
+_THUMB_H = "─"
 
 
 class ThinScrollBarRender(ScrollBarRender):
@@ -35,28 +38,20 @@ class ThinScrollBarRender(ScrollBarRender):
         back_color: Color = Color(85, 85, 85),
         bar_color: Color = Color(128, 128, 128),
     ) -> Segments:
-        if not vertical:
-            return super().render_bar(
-                size=size,
-                virtual_size=virtual_size,
-                window_size=window_size,
-                position=position,
-                thickness=thickness,
-                vertical=vertical,
-                back_color=back_color,
-                bar_color=bar_color,
-            )
-
-        width = thickness
+        glyph = _THUMB_V if vertical else _THUMB_H
+        cell_w = thickness if vertical else 1
         track_style = Style(bgcolor=back_color)
-        blank = " " * width
-        track = Segment(blank, track_style)
+        track = Segment(" " * cell_w, track_style)
 
-        scrollable = (
-            window_size and size and virtual_size and size != virtual_size
-        )
+        def assemble(segments):
+            if vertical:
+                return Segments(segments, new_lines=True)
+            # A single horizontal row (per thickness); Segment.line() ends it.
+            return Segments((segments + [Segment.line()]) * thickness, new_lines=False)
+
+        scrollable = window_size and size and virtual_size and size != virtual_size
         if not scrollable:
-            return Segments([track] * int(size), new_lines=True)
+            return assemble([track] * int(size))
 
         thumb_size = max(1, round(window_size / (virtual_size / size)))
         span = max(0, virtual_size - window_size)
@@ -65,13 +60,13 @@ class ThinScrollBarRender(ScrollBarRender):
         end = start + thumb_size
 
         thumb = Segment(
-            _THUMB * width,
+            glyph * cell_w,
             Style(color=bar_color, bgcolor=back_color, meta={"@mouse.down": "grab"}),
         )
         segments = [track] * int(size)
         for i in range(max(0, start), min(int(size), end)):
             segments[i] = thumb
-        return Segments(segments, new_lines=True)
+        return assemble(segments)
 
 
 def install() -> None:

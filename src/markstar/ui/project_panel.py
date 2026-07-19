@@ -12,6 +12,7 @@ from pathlib import Path
 
 from rich.style import Style
 from rich.text import Text
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import DirectoryTree
@@ -67,6 +68,23 @@ class WriterTree(DirectoryTree):
                 continue
         return out
 
+    @work(thread=True, exit_on_error=False)
+    def _load_directory(self, node):  # type: ignore[override]
+        """Sort order within a folder: directories first, then openable
+        (Markdown/text) files, then unsupported files — each group alphabetical."""
+        from textual.worker import get_current_worker
+
+        assert node.data is not None
+        path = node.data.path.expanduser().resolve()
+        return sorted(
+            self.filter_paths(self._directory_content(path, get_current_worker())),
+            key=lambda p: (
+                not self._safe_is_dir(p),   # directories first
+                not is_openable(p),         # then Markdown/text, then the rest
+                p.name.lower(),             # alphabetical within each group
+            ),
+        )
+
     def render_label(self, node, base_style: Style, style: Style) -> Text:
         label = super().render_label(node, base_style, style)
         # Returned label is "icon(2 chars) + name". Force the brightness tier,
@@ -116,7 +134,7 @@ class ProjectPanel(Vertical):
         border-right: solid $accent 40%;
         border-bottom: solid $accent 40%;
         border-title-color: $text;
-        border-title-align: left;
+        border-title-align: center;
     }
 
     ProjectPanel.visible {
@@ -130,6 +148,7 @@ class ProjectPanel(Vertical):
         background: $boost;
         color: $text-muted;
         scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
         scrollbar-background: $boost;
         scrollbar-background-hover: $boost;
         scrollbar-background-active: $boost;

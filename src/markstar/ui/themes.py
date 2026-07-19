@@ -298,3 +298,58 @@ def token(app, name: str, fallback: str = "#808080") -> str:
     except Exception:
         pass
     return VSCODE_DARK.variables.get(name, fallback)
+
+
+# --- dark/light detection + theme-adaptive shifting --------------------------
+# When an effect needs to lighten or darken a color, don't hardcode the sign:
+# lighten on a dark theme, darken on a light one. Detect which mathematically
+# (from the background's luminance), so custom themes work without a flag.
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    c = color.lstrip("#")
+    if len(c) == 3:
+        c = "".join(ch * 2 for ch in c)
+    try:
+        return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    except (ValueError, IndexError):
+        return 0, 0, 0
+
+
+def relative_luminance(color: str) -> float:
+    """WCAG relative luminance of a hex color (0 = black … 1 = white)."""
+
+    def _lin(v: float) -> float:
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _hex_to_rgb(color)
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
+def is_dark_color(color: str) -> bool:
+    return relative_luminance(color) < 0.5
+
+
+def theme_is_dark(app) -> bool:
+    """Whether the ACTIVE theme is dark — computed from its background luminance,
+    not a declared flag, so it's correct for any theme."""
+    try:
+        return is_dark_color(app.get_theme(app.theme).background)
+    except Exception:
+        return True
+
+
+def contrast_shift(color: str, amount: float, app) -> str:
+    """Shift ``color`` toward higher contrast with the theme background: lighten
+    on dark themes, darken on light themes. ``amount`` in 0..1.
+
+    Use this instead of a fixed +/- so the direction flips with the theme.
+    """
+    amount = max(0.0, min(1.0, amount))
+    r, g, b = _hex_to_rgb(color)
+    if theme_is_dark(app):
+        r, g, b = (int(c + (255 - c) * amount) for c in (r, g, b))  # toward white
+    else:
+        r, g, b = (int(c * (1 - amount)) for c in (r, g, b))         # toward black
+    return f"#{r:02X}{g:02X}{b:02X}"

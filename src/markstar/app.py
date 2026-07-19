@@ -45,8 +45,10 @@ from markstar.domain.markdown import (
 from markstar.domain.spellcheck import Speller
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
+from markstar.ui.edit_card import EditCard
 from markstar.ui.editor_session import EditorSession
-from markstar.ui.layout import ProseLayout, compute_layout
+from markstar.ui.layout import PANEL_GAP, ProseLayout, compute_layout
+from markstar.ui.starbot_panel import StarBotPanel
 from markstar.ui.scrollbar import install as _install_thin_scrollbars
 from markstar.ui.tab_bar import TabBar, TabInfo
 
@@ -58,6 +60,7 @@ from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree, is_openable
 from markstar.ui.spell_bar import SpellBar
 from markstar.ui.spell_controller import SpellController
+from markstar.ui.starbot_config import StarBotConfigScreen
 from markstar.ui.theme_picker import ThemePicker
 from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
@@ -101,11 +104,10 @@ class MarkStarTextArea(TextArea):
     theme change repaints them. Toggle formatting with ``render_markdown``.
     """
 
-    # Base wrap_width already reserves the scrollbar column (via
-    # scrollable_content_region) and 1 cursor cell; 3 more blank columns makes
-    # the full 5-col right inset, so text ends at the same column as the rules
-    # (which use `padding: 0 5`).
-    EXTRA_RIGHT_MARGIN = 3
+    # Base wrap_width already reserves the scrollbar column + 1 cursor cell, so
+    # text runs flush to the scrollbar with no extra right inset. (Was 3, which
+    # left a visible gap between the wrapped text and the edge.)
+    EXTRA_RIGHT_MARGIN = 0
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -606,6 +608,9 @@ class MarkStarApp(App[None]):
             screen_size=lambda: self.size,
         )
         self._autosave_timer = None
+        self._starbot_chat = None  # ai.chat.StarBotChat, built lazily on first use
+        self._starbot_transcript = None  # ai.history.ChatTranscript for the session
+        self._starbot_proposals = {}  # proposal id -> (EditProposal, EditCard)
         self._build_commands()
 
     # Compat accessors so callers/tests keep reaching the speller + walk state.
@@ -758,6 +763,11 @@ class MarkStarApp(App[None]):
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("theme_picker", "Theme…", "View", self.cmd_theme_picker)
 
+        add("toggle_starbot", "StarBot Chat", "Project", self.cmd_toggle_starbot, "ctrl+k")
+        add("starbot_new_chat", "New StarBot Chat", "Project", self.cmd_starbot_new_chat)
+        add("starbot_history", "StarBot History…", "Project", self.cmd_starbot_history)
+        add("starbot_config", "StarBot…", "Project", self.cmd_starbot_config)
+
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
         add("about", "About…", "Help", self.cmd_about)
         add(
@@ -785,6 +795,7 @@ class MarkStarApp(App[None]):
                 yield Static("", id="editor-left-pad")
                 yield MarkStarTextArea(id="editor")
                 yield Static("", id="editor-right-pad")
+                yield StarBotPanel(id="starbot-panel")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
                     yield Static("", id="status-rule")
@@ -897,12 +908,11 @@ class MarkStarApp(App[None]):
             # step behind self.theme (it updates on a later refresh), which would
             # give the editor the *previous* theme's background.
             theme_obj = self.get_theme(self.theme)
-            if theme_obj is not None:
-                bg = theme_obj.background
-                fg = theme_obj.foreground
-                sel = theme_obj.variables.get("search-match", theme_obj.primary)
-            else:
-                bg, fg, sel = "#1E1E1E", "#D4D4D4", "#264F78"
+            if theme_obj is None:
+                return  # no hardcoded fallback — every color comes from the theme
+            bg = theme_obj.background
+            fg = theme_obj.foreground
+            sel = theme_obj.variables.get("search-match", theme_obj.primary)
             ed_name = f"ms-editor-{self.theme}"
             themed = dataclasses.replace(
                 base,
@@ -952,6 +962,16 @@ class MarkStarApp(App[None]):
         if panel:
             try:
                 self.query_one("#project-panel", ProjectPanel).styles.width = panel
+            except Exception:
+                pass
+        # StarBot mirrors the project panel's width (fills its margin the same way),
+        # independent of whether the project panel itself is open.
+        if self._starbot_open():
+            sb_w = max(self.prefs.min_panel_width, left_pad - PANEL_GAP)
+            try:
+                self.query_one("#starbot-panel", StarBotPanel).styles.width = min(
+                    sb_w, width
+                )
             except Exception:
                 pass
         try:
@@ -2246,6 +2266,211 @@ class MarkStarApp(App[None]):
     @on(SpellBar.Dismissed)
     def _on_spell_dismissed(self) -> None:
         self._spell.on_dismissed()
+
+    def cmd_starbot_config(self) -> None:
+        """Project → StarBot… — configure the AI assistant connection."""
+        self.push_screen(StarBotConfigScreen())
+
+    def cmd_toggle_starbot(self) -> None:
+        """Ctrl+K — open/close the StarBot chat panel (right side)."""
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        if panel.is_open:
+            panel.close()
+            self.query_one("#editor", TextArea).focus()
+        else:
+            panel.open()
+            panel.focus_input()
+        self._update_prose_layout()
+
+    def _starbot_open(self) -> bool:
+        try:
+            return self.query_one("#starbot-panel", StarBotPanel).is_open
+        except Exception:
+            return False
+
+    @on(StarBotPanel.Submitted)
+    def _on_starbot_submit(self, event: StarBotPanel.Submitted) -> None:
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        chat = self._ensure_starbot_chat(panel)
+        if chat is None:
+            return
+        panel.add_user(event.text)
+        self.run_worker(self._starbot_turn(chat, panel, event.text))
+
+    def _ensure_starbot_chat(self, panel: StarBotPanel):
+        """Build the chat (client + project tools) on first use; guide the user to
+        configure a connection if there isn't one."""
+        if self._starbot_chat is not None:
+            return self._starbot_chat
+        from markstar.ai.chat import StarBotChat
+        from markstar.ai.client import OpenAIClient
+        from markstar.ai.config import StarBotConfig
+        from markstar.ai.tools import ProjectTools
+
+        cfg = StarBotConfig.load()
+        if not cfg.is_configured():
+            panel.add_tool("no connection — set one up in Project → StarBot…")
+            return None
+        try:
+            client = OpenAIClient(cfg)
+        except Exception as exc:  # noqa: BLE001
+            panel.add_tool(f"client error: {exc}")
+            return None
+        tools = ProjectTools(
+            self._project_root(), on_proposal=self._on_starbot_proposal
+        )
+        self._starbot_chat = StarBotChat(client, tools=tools)
+        return self._starbot_chat
+
+    def _on_starbot_proposal(self, proposal) -> None:
+        """StarBot proposed an edit — show a diff card the writer can act on."""
+        try:
+            panel = self.query_one("#starbot-panel", StarBotPanel)
+        except Exception:
+            return
+        card = panel.add_edit_card(proposal)
+        self._starbot_proposals[proposal.id] = (proposal, card)
+
+    @on(EditCard.Accepted)
+    def _on_edit_accepted(self, event: EditCard.Accepted) -> None:
+        entry = self._starbot_proposals.get(event.proposal_id)
+        if entry is None:
+            return
+        proposal, card = entry
+        if self._apply_proposal(proposal):
+            from markstar.ai.edits import ACCEPTED
+
+            card.mark(ACCEPTED)
+
+    @on(EditCard.Rejected)
+    def _on_edit_rejected(self, event: EditCard.Rejected) -> None:
+        entry = self._starbot_proposals.get(event.proposal_id)
+        if entry is None:
+            return
+        from markstar.ai.edits import REJECTED
+
+        entry[1].mark(REJECTED)
+
+    def _apply_proposal(self, proposal) -> bool:
+        """Apply an accepted edit to the file's editor buffer (undoable). Refuses
+        if the target lines no longer match what StarBot saw (avoid clobbering)."""
+        target = Path(self._project_root()) / proposal.path
+        if not target.is_file():
+            self.notify(f"Can't apply: {proposal.path} not found", severity="error")
+            return False
+        # Open the file so the change lands in the editor (visible + undoable).
+        self.workspace.open_path(target)
+        self._load_active_into_editor()
+        editor = self.query_one("#editor", TextArea)
+        doc = editor.document
+        total = doc.line_count
+        start, end = proposal.start_line, proposal.end_line
+        if start < 1 or start > total:
+            self.notify("Can't apply: line range no longer valid", severity="warning")
+            return False
+        end = min(end, total)
+        current = "\n".join(doc.get_line(i) for i in range(start - 1, end))
+        if proposal.old_text and current != proposal.old_text:
+            self.notify(
+                "The file changed since StarBot proposed this — not applied. "
+                "Ask it to re-read and re-propose.",
+                severity="warning",
+            )
+            return False
+        end_line_text = doc.get_line(end - 1)
+        editor.replace(proposal.new_text, (start - 1, 0), (end - 1, len(end_line_text)))
+        editor.focus()
+        self._refresh_status()
+        self.notify(f"Applied StarBot's edit to {proposal.path}")
+        return True
+
+    async def _starbot_turn(self, chat, panel: StarBotPanel, text: str) -> None:
+        panel.set_thinking(True)
+
+        def emit(event) -> None:
+            kind = event[0]
+            if kind == "text":
+                panel.append_assistant(event[1])
+            elif kind == "tool":
+                panel.add_tool(event[1])
+            elif kind == "done":
+                panel.finish_assistant()
+
+        try:
+            await chat.send(text, emit)
+        except Exception as exc:  # noqa: BLE001 — surface any API/network error
+            panel.add_tool(f"error: {exc}")
+            panel.finish_assistant()
+        self._save_starbot_transcript(chat)
+
+    def _save_starbot_transcript(self, chat) -> None:
+        """Persist the current conversation to the project's history folder."""
+        from datetime import datetime
+
+        from markstar.ai.history import ChatStore, ChatTranscript
+
+        messages = getattr(chat, "messages", None)
+        if not messages:
+            return
+        if self._starbot_transcript is None:
+            now = datetime.now()
+            self._starbot_transcript = ChatTranscript(
+                id=now.strftime("%Y-%m-%dT%H-%M-%S"),
+                created=now.isoformat(timespec="seconds"),
+            )
+        self._starbot_transcript.messages = list(messages)
+        ChatStore(self._project_root()).save(self._starbot_transcript)
+
+    def cmd_starbot_new_chat(self) -> None:
+        """Start a fresh StarBot conversation (the old one stays saved)."""
+        self._starbot_chat = None
+        self._starbot_transcript = None
+        self._starbot_proposals = {}
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        panel.clear()
+        if not panel.is_open:
+            panel.open()
+            self._update_prose_layout()
+        panel.focus_input()
+        self.notify("New StarBot chat")
+
+    def cmd_starbot_history(self) -> None:
+        self.run_worker(self._starbot_history_async())
+
+    async def _starbot_history_async(self) -> None:
+        from markstar.ai.history import ChatStore
+        from markstar.ui.starbot_history_screen import ChatHistoryScreen
+
+        store = ChatStore(self._project_root())
+        transcripts = store.list()
+        if not transcripts:
+            self.notify("No saved StarBot chats yet")
+            return
+        def _delete(tid: str) -> None:
+            store.delete(tid)
+            if self._starbot_transcript and self._starbot_transcript.id == tid:
+                self._starbot_transcript = None  # was the active session's file
+
+        chosen = await self.push_screen_wait(
+            ChatHistoryScreen(transcripts, on_delete=_delete)
+        )
+        if not chosen:
+            return
+        transcript = store.load(chosen)
+        if transcript is None:
+            return
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        if not panel.is_open:
+            panel.open()
+            self._update_prose_layout()
+        # Build a fresh chat and restore the saved history into it.
+        self._starbot_chat = None
+        chat = self._ensure_starbot_chat(panel)
+        if chat is not None:
+            chat.restore(transcript.messages)
+        self._starbot_transcript = transcript
+        panel.render_messages(transcript.messages)
+        panel.focus_input()
 
     def cmd_toggle_zen(self) -> None:
         """Distraction-free: empty the tab ribbon and footer text (but keep their

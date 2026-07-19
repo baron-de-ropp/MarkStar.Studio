@@ -89,6 +89,32 @@ def test_selecting_file_opens_it_in_tab(tmp_path) -> None:
     assert text.startswith("# Two")
 
 
+def test_files_sort_markdown_first_then_unsupported(tmp_path) -> None:
+    (tmp_path / "zebra.md").write_text("z")
+    (tmp_path / "apple.md").write_text("a")
+    (tmp_path / "cover.png").write_bytes(b"x")
+    (tmp_path / "banana.txt").write_text("b")
+    (tmp_path / "alpha.py").write_text("p")
+    (tmp_path / "sub").mkdir()
+
+    async def go():
+        app = MarkStarApp(path=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._set_project_root(tmp_path, focus_tree=True)
+            for _ in range(6):
+                await pilot.pause()
+            tree = app.query_one(WriterTree)
+            return [n.data.path.name for n in tree.root.children]
+
+    order = _run(go())
+    assert order == [
+        "sub",         # directory first
+        "apple.md", "banana.txt", "zebra.md",   # openable, alphabetical
+        "alpha.py", "cover.png",                # unsupported, alphabetical, bottom
+    ]
+
+
 def test_is_openable_only_markdown_and_text() -> None:
     for name in ("a.md", "b.markdown", "c.mkd", "d.txt", "E.MD"):
         assert is_openable(name), name
