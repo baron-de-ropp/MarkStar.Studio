@@ -45,6 +45,7 @@ from markstar.domain.markdown import (
 from markstar.domain.spellcheck import Speller
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
+from markstar.ui.edit_card import EditCard
 from markstar.ui.editor_session import EditorSession
 from markstar.ui.layout import PANEL_GAP, ProseLayout, compute_layout
 from markstar.ui.starbot_panel import StarBotPanel
@@ -609,6 +610,7 @@ class MarkStarApp(App[None]):
         self._autosave_timer = None
         self._starbot_chat = None  # ai.chat.StarBotChat, built lazily on first use
         self._starbot_transcript = None  # ai.history.ChatTranscript for the session
+        self._starbot_proposals = {}  # proposal id -> (EditProposal, EditCard)
         self._build_commands()
 
     # Compat accessors so callers/tests keep reaching the speller + walk state.
@@ -2314,10 +2316,73 @@ class MarkStarApp(App[None]):
         except Exception as exc:  # noqa: BLE001
             panel.add_tool(f"client error: {exc}")
             return None
-        self._starbot_chat = StarBotChat(
-            client, tools=ProjectTools(self._project_root())
+        tools = ProjectTools(
+            self._project_root(), on_proposal=self._on_starbot_proposal
         )
+        self._starbot_chat = StarBotChat(client, tools=tools)
         return self._starbot_chat
+
+    def _on_starbot_proposal(self, proposal) -> None:
+        """StarBot proposed an edit — show a diff card the writer can act on."""
+        try:
+            panel = self.query_one("#starbot-panel", StarBotPanel)
+        except Exception:
+            return
+        card = panel.add_edit_card(proposal)
+        self._starbot_proposals[proposal.id] = (proposal, card)
+
+    @on(EditCard.Accepted)
+    def _on_edit_accepted(self, event: EditCard.Accepted) -> None:
+        entry = self._starbot_proposals.get(event.proposal_id)
+        if entry is None:
+            return
+        proposal, card = entry
+        if self._apply_proposal(proposal):
+            from markstar.ai.edits import ACCEPTED
+
+            card.mark(ACCEPTED)
+
+    @on(EditCard.Rejected)
+    def _on_edit_rejected(self, event: EditCard.Rejected) -> None:
+        entry = self._starbot_proposals.get(event.proposal_id)
+        if entry is None:
+            return
+        from markstar.ai.edits import REJECTED
+
+        entry[1].mark(REJECTED)
+
+    def _apply_proposal(self, proposal) -> bool:
+        """Apply an accepted edit to the file's editor buffer (undoable). Refuses
+        if the target lines no longer match what StarBot saw (avoid clobbering)."""
+        target = Path(self._project_root()) / proposal.path
+        if not target.is_file():
+            self.notify(f"Can't apply: {proposal.path} not found", severity="error")
+            return False
+        # Open the file so the change lands in the editor (visible + undoable).
+        self.workspace.open_path(target)
+        self._load_active_into_editor()
+        editor = self.query_one("#editor", TextArea)
+        doc = editor.document
+        total = doc.line_count
+        start, end = proposal.start_line, proposal.end_line
+        if start < 1 or start > total:
+            self.notify("Can't apply: line range no longer valid", severity="warning")
+            return False
+        end = min(end, total)
+        current = "\n".join(doc.get_line(i) for i in range(start - 1, end))
+        if proposal.old_text and current != proposal.old_text:
+            self.notify(
+                "The file changed since StarBot proposed this — not applied. "
+                "Ask it to re-read and re-propose.",
+                severity="warning",
+            )
+            return False
+        end_line_text = doc.get_line(end - 1)
+        editor.replace(proposal.new_text, (start - 1, 0), (end - 1, len(end_line_text)))
+        editor.focus()
+        self._refresh_status()
+        self.notify(f"Applied StarBot's edit to {proposal.path}")
+        return True
 
     async def _starbot_turn(self, chat, panel: StarBotPanel, text: str) -> None:
         panel.set_thinking(True)
@@ -2360,6 +2425,7 @@ class MarkStarApp(App[None]):
         """Start a fresh StarBot conversation (the old one stays saved)."""
         self._starbot_chat = None
         self._starbot_transcript = None
+        self._starbot_proposals = {}
         panel = self.query_one("#starbot-panel", StarBotPanel)
         panel.clear()
         if not panel.is_open:

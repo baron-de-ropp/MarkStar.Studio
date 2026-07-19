@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Callable, Optional
+
+from markstar.ai.edits import EDIT_TOOL_SPEC, EditProposal, extract_lines
 
 # The model-facing tool definitions (OpenAI function-calling schema).
 TOOL_SPECS = [
@@ -70,6 +73,7 @@ TOOL_SPECS = [
             },
         },
     },
+    EDIT_TOOL_SPEC,
 ]
 
 # Files StarBot treats as readable text (skip binaries/images).
@@ -79,8 +83,15 @@ _MAX_GREP_HITS = 200
 
 
 class ProjectTools:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        on_proposal: Optional[Callable[[EditProposal], None]] = None,
+    ) -> None:
         self._root = Path(root).resolve()
+        # Called when the model proposes an edit; the app shows a diff card.
+        self._on_proposal = on_proposal
+        self._proposal_seq = 0
 
     # --- safety ------------------------------------------------------------
 
@@ -154,6 +165,41 @@ class ProjectTools:
             return f"(could not read {path!r}: {exc})"
         return "\n".join(f"{i:>5}  {line}" for i, line in enumerate(text.splitlines(), 1))
 
+    # --- edit proposals ----------------------------------------------------
+
+    def propose_edit(
+        self, path: str, start_line: int, end_line: int, new_text: str, reason: str
+    ) -> str:
+        p = self._resolve(path)
+        if p is None or not p.is_file():
+            return f"(no such file: {path!r})"
+        try:
+            content = p.read_bytes()[:_MAX_READ_BYTES].decode("utf-8", errors="replace")
+        except OSError as exc:
+            return f"(could not read {path!r}: {exc})"
+        try:
+            start_line = int(start_line)
+            end_line = int(end_line)
+        except (TypeError, ValueError):
+            return "(start_line and end_line must be integers)"
+        old_text = extract_lines(content, start_line, end_line)
+        self._proposal_seq += 1
+        proposal = EditProposal(
+            id=self._proposal_seq,
+            path=p.relative_to(self._root).as_posix(),
+            start_line=start_line,
+            end_line=end_line,
+            new_text=new_text,
+            reason=reason,
+            old_text=old_text,
+        )
+        if self._on_proposal is not None:
+            self._on_proposal(proposal)
+        return (
+            f"Proposed edit #{proposal.id} to {proposal.path} "
+            f"lines {start_line}-{end_line} — awaiting the writer's approval."
+        )
+
     # --- dispatch ----------------------------------------------------------
 
     def execute(self, name: str, arguments_json: str) -> str:
@@ -169,6 +215,14 @@ class ProjectTools:
             return self.grep(str(args.get("pattern", "")), str(args.get("subdir", "") or ""))
         if name == "read_file":
             return self.read_file(str(args.get("path", "")))
+        if name == "propose_edit":
+            return self.propose_edit(
+                str(args.get("path", "")),
+                args.get("start_line", 0),
+                args.get("end_line", 0),
+                str(args.get("new_text", "")),
+                str(args.get("reason", "")),
+            )
         return f"(unknown tool: {name})"
 
     @staticmethod
@@ -185,4 +239,6 @@ class ProjectTools:
         if name == "list_files":
             sub = args.get("subdir")
             return f"list {sub}" if sub else "list files"
+        if name == "propose_edit":
+            return f'propose edit — {args.get("path", "")}'
         return name

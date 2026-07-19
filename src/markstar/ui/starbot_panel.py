@@ -164,9 +164,20 @@ class StarBotPanel(Vertical):
         self._add(f"[{self._you_color()}]You[/]\n{_esc(text)}")
 
     def add_tool(self, summary: str) -> None:
+        self._assistant = None  # a tool line separates assistant messages
         dim = token(self, "rule")
         mut = token(self, "tab-inactive")
         self._add(f"[{dim}]  · [/][{mut}]{_esc(summary)}[/]")
+
+    def add_edit_card(self, proposal):
+        """Mount a proposed-edit diff card into the transcript; returns it."""
+        from markstar.ui.edit_card import EditCard
+
+        self._assistant = None
+        card = EditCard(proposal)
+        self._log().mount(card)
+        self.call_after_refresh(lambda: self._log().scroll_end(animate=False))
+        return card
 
     def _you_color(self) -> str:
         return token(self, "md-quote")   # a distinct (green-family) name color
