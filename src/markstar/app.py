@@ -1017,30 +1017,24 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
         self._refresh_metrics()
-        self.call_after_refresh(self._update_prose_rules)
+        self._set_prose_rules(col)
 
-    def _update_prose_rules(self, _retries: int = 0) -> None:
-        """Fill top/bottom rules with ─ to match laid-out width (prose column)."""
-        pending = False
+    def _set_prose_rules(self, col: int) -> None:
+        """Fill the top/bottom rules to exactly the prose-column width.
+
+        Uses ``col`` from _compute_layout directly (the content width between the
+        paddings) rather than reading the rules' laid-out size — the latter lags a
+        frame behind on resize, so reading it left a stub rule when *growing* the
+        window (and required a retry loop when shrinking). Deterministic now."""
+        line = "─" * max(1, col)
         for rule_id in ("#status-rule", "#tab-rule"):
             try:
                 rule = self.query_one(rule_id, Static)
             except Exception:
                 continue
-            # A hidden/undisplayed rule has no meaningful width — skip it rather
-            # than wait for one. (Retrying forever on a permanently-zero-width
-            # widget is a CPU-pegging repaint loop; that must never happen.)
-            if not rule.display:
+            if not rule.display:  # e.g. hidden in zen mode
                 continue
-            # Use the widget's actual laid-out width so we track the prose surface
-            width = max(1, rule.size.width)
-            if width <= 1:
-                pending = True
-                continue
-            rule.update("─" * width)
-        # Layout not ready yet — retry next frame, but bounded (≈16 frames max).
-        if pending and _retries < 16:
-            self.call_after_refresh(lambda: self._update_prose_rules(_retries + 1))
+            rule.update(line)
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
@@ -1181,7 +1175,8 @@ class MarkStarApp(App[None]):
             pass
 
         self._refresh_metrics()
-        self.call_after_refresh(self._update_prose_rules)
+        _, _, col, _ = self._compute_layout(self.size.width or 0, self._panel_open())
+        self._set_prose_rules(col)
         self._refresh_panel_open_files()
         name = self.document.path.name if self.document.path else "Untitled"
         self.title = f"{name}{' •' if self.document.dirty else ''}"
