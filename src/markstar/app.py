@@ -32,6 +32,7 @@ from markstar.domain.search import (
     replace_match,
     step_find,
 )
+from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
@@ -135,6 +136,7 @@ class MarkStarTextArea(TextArea):
         super().__init__(*args, **kwargs)
         # line_index -> list of (start_col, end_col) character offsets on that line
         self._search_by_line: dict[int, list[tuple[int, int]]] = {}
+        self._spell_by_line: dict[int, list[tuple[int, int]]] = {}
         self.render_markdown = True
         self._styles: dict[str, Style] = {}
         self._style_key: str | None = None  # theme name the cache was built for
@@ -168,6 +170,9 @@ class MarkStarTextArea(TextArea):
             "quote": Style(color=token(self.app, "md-quote", "#7BA88B"), italic=True),
             "link": Style(color=token(self.app, "md-link", "#4E9CD6"), underline=True),
             "search": Style(bgcolor=token(self.app, "search-match", "#515C6A")),
+            "spell": Style(
+                color=token(self.app, "spell-underline", "#D16969"), underline=True
+            ),
         }
         self._style_key = name
         return self._styles
@@ -273,6 +278,30 @@ class MarkStarTextArea(TextArea):
         self._line_cache.clear()
         self.refresh()
 
+    def set_spell_highlights(self, matches: list[Match]) -> None:
+        """Underline misspelled words. Pass ``[]`` to clear."""
+        by_line: dict[int, list[tuple[int, int]]] = {}
+        for match in matches:
+            try:
+                sr, sc = self.document.get_location_from_index(match.start)
+                er, ec = self.document.get_location_from_index(match.end)
+            except Exception:
+                continue
+            if sr == er:
+                by_line.setdefault(sr, []).append((sc, ec))
+        if by_line == self._spell_by_line:
+            return
+        self._spell_by_line = by_line
+        self._line_cache.clear()
+        self.refresh()
+
+    def clear_spell_highlights(self) -> None:
+        if not self._spell_by_line:
+            return
+        self._spell_by_line = {}
+        self._line_cache.clear()
+        self.refresh()
+
     def get_line(self, line_index: int) -> Text:
         line = super().get_line(line_index)
         styles: dict[str, Style] | None = None
@@ -304,6 +333,14 @@ class MarkStarTextArea(TextArea):
             for start_col, end_col in search:
                 if start_col < end_col:
                     line.stylize(styles["search"], start_col, end_col)
+
+        spell = self._spell_by_line.get(line_index)
+        if spell:
+            if styles is None:
+                styles = self._theme_styles()
+            for start_col, end_col in spell:
+                if start_col < end_col:
+                    line.stylize(styles["spell"], start_col, end_col)
         return line
 
 
@@ -542,6 +579,9 @@ class MarkStarApp(App[None]):
         self._last_find_end = 0
         # (start, end, close_col, index) per tab chip — for click routing.
         self._tab_bounds: list[tuple[int, int, int, int]] = []
+        self._speller = Speller(self.prefs.spell_added)
+        self._spellcheck_on = self.prefs.spellcheck
+        self._spell_timer = None
         self._build_commands()
 
     @property
@@ -672,6 +712,7 @@ class MarkStarApp(App[None]):
         add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
+        add("toggle_spellcheck", "Spellcheck", "Tools", self.cmd_toggle_spellcheck)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
         add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
@@ -768,6 +809,9 @@ class MarkStarApp(App[None]):
         elif self._path_arg is None and not self.is_headless:
             # Fresh launch (no arg) → welcome screen. Skipped under headless tests.
             self.call_after_refresh(lambda: self.run_worker(self._show_welcome()))
+
+        if self._spellcheck_on:
+            self.call_after_refresh(self._run_spellcheck)
 
     def on_resize(self, event) -> None:
         self._update_prose_layout()
@@ -882,6 +926,7 @@ class MarkStarApp(App[None]):
         # Fenced code blocks are multi-line — recompute which lines are in a fence.
         if isinstance(event.text_area, MarkStarTextArea):
             event.text_area.recompute_fences()
+        self._schedule_spellcheck()
         # Keep soft find highlights in sync while typing in the buffer.
         try:
             if self.query_one("#find-bar", FindBar).is_visible:
@@ -2022,6 +2067,46 @@ class MarkStarApp(App[None]):
             self.prefs.mouse = "on"
             self.prefs.save()
             self.notify("Mouse captured — click, scroll, and hover enabled")
+
+    def cmd_toggle_spellcheck(self) -> None:
+        """Toggle underlining of misspelled words."""
+        self._spellcheck_on = not self._spellcheck_on
+        self.prefs.spellcheck = self._spellcheck_on
+        self.prefs.save()
+        if self._spellcheck_on:
+            self._run_spellcheck()
+        else:
+            try:
+                self.query_one("#editor", MarkStarTextArea).clear_spell_highlights()
+            except Exception:
+                pass
+        self.notify(f"Spellcheck {'on' if self._spellcheck_on else 'off'}")
+
+    def _schedule_spellcheck(self) -> None:
+        """Debounce a re-check ~0.6s after the last edit."""
+        if not self._spellcheck_on:
+            return
+        if self._spell_timer is not None:
+            self._spell_timer.stop()
+        self._spell_timer = self.set_timer(0.6, self._run_spellcheck)
+
+    def _run_spellcheck(self) -> None:
+        if not self._spellcheck_on:
+            return
+        text = self.document.text
+
+        def work() -> None:
+            # Dictionary loads lazily here — off the UI thread on first use.
+            matches = find_misspellings(text, self._speller.known)
+            self.call_from_thread(self._apply_spell, matches)
+
+        self.run_worker(work, thread=True, exclusive=True, group="spell")
+
+    def _apply_spell(self, matches: list[Match]) -> None:
+        try:
+            self.query_one("#editor", MarkStarTextArea).set_spell_highlights(matches)
+        except Exception:
+            pass
 
     def cmd_toggle_center(self) -> None:
         """Toggle dynamic centering of the prose column."""

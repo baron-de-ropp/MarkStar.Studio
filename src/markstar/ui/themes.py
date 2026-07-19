@@ -37,6 +37,7 @@ _DARK_VARS = {
     "md-heading": "#569CD6",
     "md-quote": "#7BA88B",
     "md-link": "#4E9CD6",
+    "spell-underline": "#D16969",
 }
 
 VSCODE_DARK = Theme(
@@ -70,6 +71,7 @@ _LIGHT_VARS = {
     "md-heading": "#1A6FB0",
     "md-quote": "#5E7C5E",
     "md-link": "#0B66C3",
+    "spell-underline": "#C0392B",
 }
 
 MARKSTAR_LIGHT = Theme(

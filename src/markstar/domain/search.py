@@ -12,6 +12,7 @@ from markstar.domain.document import Document
 class Match:
     start: int
     end: int
+    # (kept minimal; used for search hits and misspelling spans alike)
 
     @property
     def length(self) -> int:

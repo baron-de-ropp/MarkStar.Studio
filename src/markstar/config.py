@@ -55,7 +55,9 @@ class Preferences:
     min_panel_width: int = 40  # project panel min columns (grows to fill margin)
     prose_width: int = 120  # max writing-measure columns (line wrap cap)
     center_text: bool = True  # center the prose column in the terminal
+    spellcheck: bool = True  # underline unknown words
     recent_projects: list = field(default_factory=list)  # last folders (max 5)
+    spell_added: list = field(default_factory=list)  # personal dictionary
 
     @classmethod
     def load(cls) -> "Preferences":
@@ -78,9 +80,14 @@ class Preferences:
             prefs.soft_wrap = data["soft_wrap"]
         if isinstance(data.get("center_text"), bool):
             prefs.center_text = data["center_text"]
+        if isinstance(data.get("spellcheck"), bool):
+            prefs.spellcheck = data["spellcheck"]
         rp = data.get("recent_projects")
         if isinstance(rp, list):
             prefs.recent_projects = [str(x) for x in rp if isinstance(x, str)][:5]
+        sa = data.get("spell_added")
+        if isinstance(sa, list):
+            prefs.spell_added = [str(x) for x in sa if isinstance(x, str)]
         prefs.min_panel_width = _clamp_int(
             data.get("min_panel_width"), prefs.min_panel_width, 15, 80
         )
