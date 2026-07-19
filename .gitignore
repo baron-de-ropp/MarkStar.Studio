@@ -20,3 +20,4 @@ untitled*.md
 .venv/
 __pycache__/
 *.egg-info/
+*.spec

@@ -1,0 +1,111 @@
+name: Release
+
+# Cut a release by pushing a version tag:  git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # needed to create the GitHub Release
+
+# One binary per OS (PyInstaller), then wrapped into that OS's package format.
+# Every job installs the app + its deps and freezes them into a self-contained
+# binary — no Python needed on the user's machine.
+env:
+  PYINSTALLER_ARGS: >-
+    --onefile --name markstar
+    --collect-all textual --collect-all rich --collect-all spellchecker
+    --collect-all openai --collect-all pydantic --collect-all pydantic_core
+    packaging/entry.py
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build binary
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller
+          pyinstaller ${{ env.PYINSTALLER_ARGS }}
+      - name: Package .deb and .rpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev build-essential rpm
+          sudo gem install --no-document fpm
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p pkgroot/usr/bin
+          cp dist/markstar pkgroot/usr/bin/markstar
+          chmod +x pkgroot/usr/bin/markstar
+          for T in deb rpm; do
+            fpm -s dir -t "$T" -n markstarstudio -v "$VERSION" \
+              --description "MarkStar Studio - a Markdown-native terminal word processor" \
+              --license MIT --url "https://github.com/baron-de-ropp/markstarstudio" \
+              --maintainer "Ryan Baron de Ropp" \
+              -C pkgroot .
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            *.deb
+            *.rpm
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build .exe
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller
+          pyinstaller ${{ env.PYINSTALLER_ARGS }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/markstar.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build binary
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller
+          pyinstaller ${{ env.PYINSTALLER_ARGS }}
+      - name: Make .dmg
+        run: |
+          mkdir -p dmgroot
+          cp dist/markstar dmgroot/markstar
+          hdiutil create -volname "MarkStar Studio" -srcfolder dmgroot \
+            -ov -format UDZO markstarstudio.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: markstarstudio.dmg
+
+  release:
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true  # review the artifacts before you publish
+          files: |
+            linux/*.deb
+            linux/*.rpm
+            windows/markstar.exe
+            macos/markstarstudio.dmg
