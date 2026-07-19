@@ -64,40 +64,59 @@ def test_click_close_x_closes_tab(tmp_path) -> None:
     assert before == 2 and after == 1
 
 
-def test_configurable_widths_applied(tmp_path, monkeypatch) -> None:
+def test_prose_width_pref_applied_to_editor(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
-    Preferences(min_panel_width=50, prose_width=80).save()
+    Preferences(prose_width=80).save()
 
     async def go():
         app = MarkStarApp(prefs=Preferences.load())
-        # Narrow terminal so the margin can't grow the panel past its minimum.
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(120, 24)) as pilot:
             await pilot.pause()
-            ed = app.query_one("#editor", MarkStarTextArea)
-            panel = app.query_one("#project-panel", ProjectPanel)
-            return ed.prose_width, int(panel.styles.width.value)
+            return app.query_one("#editor", MarkStarTextArea).prose_width
 
-    prose_width, panel_width = _run(go())
-    assert prose_width == 80
-    assert panel_width == 50  # floors at min on a narrow terminal
+    assert _run(go()) == 80
 
 
-def test_panel_grows_to_fill_margin(tmp_path, monkeypatch) -> None:
-    """On a wide terminal the panel fills the left margin minus a 5-col gap."""
-    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
-    Preferences(min_panel_width=40, prose_width=120).save()
+def test_layout_keeps_prose_clear_of_the_panel() -> None:
+    """Editor + tabs must start at/after the panel's right edge at every size."""
 
     async def go():
-        app = MarkStarApp(prefs=Preferences.load())
-        async with app.run_test(size=(220, 24)) as pilot:
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
             await pilot.pause()
-            margin = app._prose_margin()  # (220-120)//2 = 50
-            panel = app.query_one("#project-panel", ProjectPanel)
-            return margin, int(panel.styles.width.value)
+            results = []
+            for width, panel_open in [
+                (160, True), (120, True), (76, True), (50, True), (40, True),
+                (100, False),
+            ]:
+                panel, left_pad, col, right_pad = app._compute_layout(width, panel_open)
+                available = width - panel
+                results.append((width, panel_open, panel, left_pad, col, right_pad, available))
+            return results
 
-    margin, panel_width = _run(go())
-    assert margin == 50
-    assert panel_width == 45  # margin - 5, above the 40 minimum
+    for width, panel_open, panel, left_pad, col, right_pad, available in _run(go()):
+        assert left_pad >= panel, f"{width}: editor hidden under panel"
+        assert col >= 1
+        assert left_pad + col + right_pad == width, f"{width}: columns don't sum"
+        assert col <= available, f"{width}: prose wider than available space"
+        if panel_open:
+            assert panel <= width - 24, f"{width}: panel eats the screen"
+
+
+def test_centering_narrows_and_toggle_off_widens() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(200, 24)) as pilot:
+            await pilot.pause()
+            _, _, col_centered, _ = app._compute_layout(200, False)  # 120 cap
+            app.cmd_toggle_center()
+            await pilot.pause()
+            _, _, col_full, _ = app._compute_layout(200, False)
+            return col_centered, col_full
+
+    centered, full = _run(go())
+    assert centered == 120  # capped at prose_width, centered
+    assert full == 190  # not centered → fills (200 - 2*5)
 
 
 def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
@@ -105,32 +124,6 @@ def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
     prefs = Preferences.load()
     assert prefs.prose_width == 120
     assert prefs.min_panel_width == 40  # new default
-
-
-def test_prose_centering_margins() -> None:
-    async def go():
-        app = MarkStarApp()
-        async with app.run_test(size=(200, 24)) as pilot:
-            await pilot.pause()
-            wide = app._prose_margin()  # (200-120)//2 = 40
-            app.cmd_toggle_center()
-            await pilot.pause()
-            off = app._prose_margin()  # base 5
-            return wide, off
-
-    wide, off = _run(go())
-    assert wide == 40
-    assert off == 5
-
-
-def test_narrow_terminal_floors_margin() -> None:
-    async def go():
-        app = MarkStarApp()
-        async with app.run_test(size=(100, 24)) as pilot:
-            await pilot.pause()
-            return app._prose_margin()
-
-    assert _run(go()) == 5  # (100-120)//2 negative → floor at base
 
 
 def test_opening_same_document_twice_reuses_tab(tmp_path) -> None:

@@ -670,6 +670,7 @@ class MarkStarApp(App[None]):
         self._path_arg = root
         panel.set_root(root)
         panel.open()
+        self._update_prose_layout()  # prose re-centers clear of the panel
         if focus_tree:
             panel.focus_tree()
         self._record_recent_project(root)
@@ -925,62 +926,76 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
 
-    def _prose_margin(self) -> int:
-        """Left/right margin (columns) for the prose frame.
+    def _compute_layout(self, width: int, panel_open: bool) -> tuple[int, int, int, int]:
+        """Pure layout math → (panel_cols, left_pad, prose_cols, right_pad).
 
-        Centered: margin grows so the ≤ prose_width column sits mid-terminal.
-        Not centered: a fixed comfortable outer margin (spec: 5 at ≥90 cols,
-        else 2; never 0).
+        The prose column lives to the RIGHT of the (overlay) panel and centers in
+        the space that's left, so nothing is ever hidden under the panel. The
+        panel is clamped so prose always keeps >= ~24 columns.
         """
-        width = self.size.width or 0
+        panel = 0
+        if panel_open:
+            panel = max(15, min(self.prefs.min_panel_width, width - 24))
+            panel = max(0, panel)
+        available = max(1, width - panel)
         base = 5 if width >= 90 else 2
-        if not self.prefs.center_text:
-            return base
-        return max(base, (width - self.prefs.prose_width) // 2)
+        if self.prefs.center_text:
+            col = min(self.prefs.prose_width, max(1, available - 2 * base))
+            side = max(base, (available - col) // 2)
+        else:
+            side = base
+            col = max(1, available - 2 * base)
+        left_pad = panel + side
+        right_pad = max(0, width - left_pad - col)
+        return panel, left_pad, col, right_pad
 
-    def _panel_width(self, margin: int) -> int:
-        """Project panel width: fill the left margin but stop 5 cols short of the
-        text; never narrower than the configured minimum."""
-        return max(self.prefs.min_panel_width, margin - 5)
+    def _panel_open(self) -> bool:
+        try:
+            return self.query_one("#project-panel", ProjectPanel).is_open
+        except Exception:
+            return False
 
     def _update_prose_layout(self) -> None:
-        """Apply the current margin to every element of the prose frame so tabs,
-        rules, text, and footer share one centered (or fixed) measure — and align
-        the menu ribbon and grow the project panel to match."""
-        margin = self._prose_margin()
+        """Position tabs, rules, editor, footer and menu into one centered prose
+        column that sits clear of the project panel. Recomputed on every resize
+        and whenever the panel opens/closes."""
+        width = self.size.width or 0
+        panel, left_pad, col, right_pad = self._compute_layout(width, self._panel_open())
+
+        if panel:
+            try:
+                self.query_one("#project-panel", ProjectPanel).styles.width = panel
+            except Exception:
+                pass
+        try:
+            self.query_one("#editor-left-pad").styles.width = left_pad
+        except Exception:
+            pass
+        try:
+            self.query_one("#editor-right-pad").styles.width = right_pad
+        except Exception:
+            pass
+        # Tabs + rules align with the editor column.
         for sel in ("#tab-strip", "#status-rule-row"):
             try:
-                self.query_one(sel).styles.padding = (0, margin)
+                self.query_one(sel).styles.padding = (0, right_pad, 0, left_pad)
             except Exception:
                 pass
-        # Footer hint + stats align with the tab filename, which sits 3 cols in
-        # (the "   " lead on each tab chip).
+        # Footer content sits 3 cols in (the tab chip's leading spaces).
         try:
-            self.query_one("#support-row").styles.padding = (0, margin + 3)
+            self.query_one("#support-row").styles.padding = (0, right_pad, 0, left_pad + 3)
         except Exception:
             pass
-        for sel in ("#editor-left-pad", "#editor-right-pad"):
-            try:
-                self.query_one(sel).styles.width = margin
-            except Exception:
-                pass
-        # Menu ribbon starts at the same column as the tabs / text.
+        # Menu ribbon + dropdown align with the tabs.
         try:
-            self.query_one("#app-menu #menu-names", Static).styles.padding = (0, margin)
+            self.query_one("#app-menu #menu-names", Static).styles.padding = (0, 0, 0, left_pad)
         except Exception:
             pass
         try:
-            self.query_one("#app-menu #menu-options").styles.margin = (0, 0, 0, margin)
+            self.query_one("#app-menu #menu-options").styles.margin = (0, 0, 0, left_pad)
         except Exception:
             pass
-        # Project panel fills the blank left margin (minus a 5-col gap), floored
-        # at the configured minimum width.
-        try:
-            self.query_one("#project-panel", ProjectPanel).styles.width = (
-                self._panel_width(margin)
-            )
-        except Exception:
-            pass
+        self._refresh_metrics()
         self.call_after_refresh(self._update_prose_rules)
 
     def _update_prose_rules(self) -> None:
@@ -1088,10 +1103,17 @@ class MarkStarApp(App[None]):
             return 1, 1
 
     def _refresh_metrics(self) -> None:
-        """Right-aligned: characters, words, Markdown flavor."""
+        """Right-aligned stats, shortened on narrow terminals so they don't
+        overflow the footer."""
         chars = len(self.document.text)
         words = self.document.word_count()
-        text = f"{chars} characters  │  {words} words  │  CommonMark"
+        width = self.size.width or 0
+        if width < 66:
+            text = f"{words}w"
+        elif width < 92:
+            text = f"{chars}c  │  {words}w"
+        else:
+            text = f"{chars} characters  │  {words} words  │  CommonMark"
         try:
             self.query_one("#support-metrics", Static).update(text)
         except Exception:
@@ -1224,6 +1246,7 @@ class MarkStarApp(App[None]):
             panel = self.query_one("#project-panel", ProjectPanel)
             if panel.is_open:
                 panel.close()
+                self._update_prose_layout()
                 self.query_one("#editor", TextArea).focus()
                 return
         except Exception:
@@ -1362,6 +1385,7 @@ class MarkStarApp(App[None]):
         else:
             panel.open()
             panel.focus_tree()
+        self._update_prose_layout()  # prose re-centers clear of the panel
 
     def action_toggle_project(self) -> None:
         self.cmd_toggle_project_panel()
