@@ -84,6 +84,8 @@ class Preferences:
             prefs.center_text = data["center_text"]
         if isinstance(data.get("spellcheck"), bool):
             prefs.spellcheck = data["spellcheck"]
+        if isinstance(data.get("autosave"), bool):
+            prefs.autosave = data["autosave"]
         rp = data.get("recent_projects")
         if isinstance(rp, list):
             prefs.recent_projects = [str(x) for x in rp if isinstance(x, str)][:5]
@@ -94,6 +96,9 @@ class Preferences:
             data.get("min_panel_width"), prefs.min_panel_width, 15, 80
         )
         prefs.prose_width = _clamp_int(data.get("prose_width"), prefs.prose_width, 40, 400)
+        prefs.autosave_ms = _clamp_int(
+            data.get("autosave_ms"), prefs.autosave_ms, 100, 60000
+        )
         return prefs
 
     def save(self) -> None:

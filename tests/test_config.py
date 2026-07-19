@@ -21,7 +21,12 @@ def test_config_path_honors_env_override(tmp_path, monkeypatch) -> None:
 def test_save_and_reload_round_trip(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
     Preferences(
-        theme="markstar-light", mouse="off", formatting=False, soft_wrap=False
+        theme="markstar-light",
+        mouse="off",
+        formatting=False,
+        soft_wrap=False,
+        autosave=False,
+        autosave_ms=3000,
     ).save()
 
     reloaded = Preferences.load()
@@ -29,6 +34,10 @@ def test_save_and_reload_round_trip(tmp_path, monkeypatch) -> None:
     assert reloaded.mouse == "off"
     assert reloaded.formatting is False
     assert reloaded.soft_wrap is False
+    # Regression: autosave + autosave_ms are written by _to_toml but were never
+    # parsed back by load(), so toggling autosave off didn't survive a restart.
+    assert reloaded.autosave is False
+    assert reloaded.autosave_ms == 3000
 
 
 def test_toml_is_human_readable(tmp_path, monkeypatch) -> None:
