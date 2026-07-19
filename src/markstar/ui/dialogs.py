@@ -12,6 +12,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label
 
+from markstar.ui.path_input import PathInput
 from markstar.ui.themes import token
 
 
@@ -59,10 +60,13 @@ class PathPrompt(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="path-panel"):
             yield Label(self._title, id="path-title")
-            yield Input(
+            yield PathInput(
                 value=self._initial, placeholder="/path/to/file.md", id="path-input"
             )
-            yield Label(self._hint or "Enter · save   Esc · cancel", id="path-hint")
+            yield Label(
+                self._hint or "Tab · complete   Enter · save   Esc · cancel",
+                id="path-hint",
+            )
 
     def on_mount(self) -> None:
         inp = self.query_one("#path-input", Input)

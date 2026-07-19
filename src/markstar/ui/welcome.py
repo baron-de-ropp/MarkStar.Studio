@@ -17,6 +17,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
+from markstar.ui.path_input import PathInput
+
 from markstar.ui.themes import token
 
 # ANSI Shadow "MARK" and "STAR", split so each word takes its own theme color.
@@ -238,9 +240,9 @@ class WelcomeScreen(ModalScreen):
             yield Static(self._logo_markup(), id="welcome-logo", markup=True)
             yield Static("", id="welcome-tagline")
             yield Static("Choose your project folder", id="welcome-prompt")
-            yield Input(
+            yield PathInput(
                 value=str(self._default_dir),
-                placeholder="~/path/to/your/project",
+                placeholder="~/path/to/your/project  (Tab to complete)",
                 id="welcome-folder",
             )
             if self._recent:
