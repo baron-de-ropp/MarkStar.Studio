@@ -23,6 +23,14 @@ class _StubChat:
         emit(("done", None))
 
 
+def test_sanitize_strips_emoji_keeps_arrows_and_escapes_brackets() -> None:
+    from markstar.ui.starbot_panel import _sanitize
+
+    assert "🗺" not in _sanitize("map 🗺️ here")
+    assert _sanitize("a → b") == "a → b"        # arrows are single-cell, kept
+    assert _sanitize("[x]") == "\\[x]"          # markup bracket escaped
+
+
 def test_ctrl_k_toggles_panel() -> None:
     async def go():
         app = MarkStarApp()

@@ -9,6 +9,8 @@ finish_assistant). The conversation itself lives in ai/chat.StarBotChat.
 
 from __future__ import annotations
 
+import re
+
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -50,11 +52,16 @@ class StarBotPanel(Vertical):
     }
     StarBotPanel .sb-msg { height: auto; padding: 0 0 1 0; }
     StarBotPanel #sb-spinner { height: auto; color: $text-muted; }
+    /* A blank breathing row sits above the rule (see compose). */
     StarBotPanel #sb-rule { height: 1; color: $text-muted 22%; }
     StarBotPanel #sb-input {
-        border: none; padding: 0; height: auto; background: $boost;
+        /* Recessed, slightly darker field so the input reads as distinct. */
+        border: none; padding: 0 1; height: auto; background: $background;
+        margin: 1 0;
     }
     StarBotPanel #sb-foot { height: 1; color: $text-muted; }
+    /* Blank rows for breathing room below the transcript and below the hints. */
+    StarBotPanel #sb-breath, StarBotPanel #sb-botpad { height: 1; }
     """
 
     class Submitted(Message):
@@ -75,9 +82,11 @@ class StarBotPanel(Vertical):
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="sb-log")
         yield Static("", id="sb-spinner")
+        yield Static("", id="sb-breath")  # breathing row below the transcript
         yield Static("─" * 40, id="sb-rule")
         yield Input(placeholder="ask StarBot…", id="sb-input")
         yield Static("", id="sb-foot")
+        yield Static("", id="sb-botpad")  # breathing row below the hints
 
     def on_mount(self) -> None:
         self.border_title = " StarBot "
@@ -197,5 +206,26 @@ class StarBotPanel(Vertical):
         self.post_message(self.Submitted(text))
 
 
-def _esc(text: str) -> str:
-    return text.replace("[", "\\[")
+# Emoji / pictographs / variation selectors render as multi-cell (or zero-cell)
+# glyphs that throw off Textual's column math — corrupting wrap width and the
+# scrollbar. Strip them on the way to the screen. Arrows (→), box-drawing, and
+# ordinary typography are left alone (they're single-cell and legitimate).
+_EMOJI = re.compile(
+    "["
+    "\U0001f000-\U0001faff"  # emoji, pictographs, symbols & pictographs supplement
+    "\U00002600-\U000027bf"  # miscellaneous symbols + dingbats
+    "\U00002b00-\U00002bff"  # miscellaneous symbols and arrows (mostly emoji-ish)
+    "\U0000fe00-\U0000fe0f"  # variation selectors (force emoji presentation)
+    "\U0000200d"             # zero-width joiner (emoji sequences)
+    "\U0000fe0f"
+    "]"
+)
+
+
+def _sanitize(text: str) -> str:
+    """Drop emoji (they break cell counts) and escape markup brackets."""
+    return _EMOJI.sub("", text).replace("[", "\\[")
+
+
+# Back-compat alias — the transcript helpers call this name.
+_esc = _sanitize

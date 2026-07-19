@@ -21,7 +21,10 @@ SYSTEM_PROMPT = (
     "specific passages and cite file:line. For continuity and consistency work "
     "(names, places, established facts, timelines), grep is your best friend.\n\n"
     "You cannot edit files yet, so give precise, actionable notes rather than "
-    "rewrites. Be concise, concrete, and honest; respect the writer's voice."
+    "rewrites. Be concise, concrete, and honest; respect the writer's voice.\n\n"
+    "Do NOT use emoji or other decorative multi-cell Unicode characters — the "
+    "terminal renders them at the wrong width and it breaks the layout. Plain "
+    "text and standard punctuation only."
 )
 
 # Event kinds passed to emit():
