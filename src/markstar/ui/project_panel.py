@@ -148,6 +148,7 @@ class ProjectPanel(Vertical):
         background: $boost;
         color: $text-muted;
         scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
         scrollbar-background: $boost;
         scrollbar-background-hover: $boost;
         scrollbar-background-active: $boost;
