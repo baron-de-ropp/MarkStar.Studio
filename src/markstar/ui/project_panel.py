@@ -45,6 +45,11 @@ class WriterTree(DirectoryTree):
         super().__init__(*args, **kwargs)
         self._open_paths: set[str] = set()
         self._active_path: str | None = None
+        # No connector guide lines — indentation alone shows the hierarchy, and it
+        # stays quiet. (Textual renders the ├──/└── elbows with an unflattened
+        # alpha that falls back to bright white when the tree is blurred; turning
+        # guides off avoids that entirely.)
+        self.show_guides = False
 
     def set_open_files(self, open_paths: set[str], active: str | None) -> None:
         self._open_paths = open_paths
@@ -142,19 +147,7 @@ class ProjectPanel(Vertical):
     ProjectPanel WriterTree > .directory-tree--file {
         color: $text-muted;
     }
-    /* Keep the indentation guides faint in every state. Textual's Tree brightens
-       the SELECTED node's guides when the tree is blurred (and applies a
-       text-style we must also clear), which lit them up bright white after focus
-       left the panel. Cover both the focused and blurred variants. */
-    ProjectPanel WriterTree > .tree--guides,
-    ProjectPanel WriterTree > .tree--guides-hover,
-    ProjectPanel WriterTree > .tree--guides-selected,
-    ProjectPanel WriterTree:focus > .tree--guides,
-    ProjectPanel WriterTree:focus > .tree--guides-hover,
-    ProjectPanel WriterTree:focus > .tree--guides-selected {
-        color: $text-muted 18%;
-        text-style: none;
-    }
+    /* Guide lines are disabled (WriterTree.show_guides = False). */
     ProjectPanel WriterTree > .tree--cursor {
         background: $accent 40%;
         color: $text;

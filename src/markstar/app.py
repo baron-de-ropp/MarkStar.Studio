@@ -950,9 +950,16 @@ class MarkStarApp(App[None]):
                 self.query_one(sel).styles.padding = (0, right_pad, 0, left_pad)
             except Exception:
                 pass
-        # Footer content sits 3 cols in (the tab chip's leading spaces).
+        # Footer content sits 3 cols inside the prose column on BOTH sides (the
+        # left matches the tab chip's leading spaces; the right mirrors it so the
+        # metrics corner is inset the same as the hints corner).
         try:
-            self.query_one("#support-row").styles.padding = (0, right_pad, 0, left_pad + 3)
+            self.query_one("#support-row").styles.padding = (
+                0,
+                right_pad + 3,
+                0,
+                left_pad + 3,
+            )
         except Exception:
             pass
         # Menu ribbon + dropdown align with the tabs.
