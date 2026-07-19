@@ -51,20 +51,28 @@ class WriterTree(DirectoryTree):
 
     def render_label(self, node, base_style: Style, style: Style) -> Text:
         label = super().render_label(node, base_style, style)
-        data = getattr(node, "data", None)
-        path = getattr(data, "path", None)
-        if path is None:
-            return label
-        try:
-            key = str(Path(path).resolve())
-        except Exception:
-            return label
-        # Three tiers: closed = dim (CSS), open = a bit brighter, active =
-        # highlighted (accent + bold).
-        if key == self._active_path:
-            label.stylize(Style(color=token(self.app, "hint-key"), bold=True))
-        elif key in self._open_paths:
-            label.stylize(Style(color=token(self.app, "tab-active")))
+        # Returned label is "icon(2 chars) + name". Force the brightness tier,
+        # overriding DirectoryTree's default bold/bright folder styling:
+        #   folders + closed files → dim (clearly below the editor text)
+        #   open file (in a tab)   → brighter name
+        #   active file            → brighter name, and its bullet in the accent
+        key = None
+        path = getattr(getattr(node, "data", None), "path", None)
+        if path is not None:
+            try:
+                key = str(Path(path).resolve())
+            except Exception:
+                key = None
+        bright = token(self.app, "tab-active")
+        dim = token(self.app, "tab-inactive")
+        if key is not None and key == self._active_path:
+            label.stylize(Style(color=bright, bold=False))
+            if len(label) >= 2:  # bullet only → accent
+                label.stylize(Style(color=token(self.app, "hint-key"), bold=True), 0, 2)
+        elif key is not None and key in self._open_paths:
+            label.stylize(Style(color=bright, bold=False))
+        else:  # folders + closed files → dim, never bold
+            label.stylize(Style(color=dim, bold=False))
         return label
 
 
