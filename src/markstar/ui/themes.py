@@ -99,10 +99,15 @@ DEFAULT_THEME_NAME = "vscode-dark"
 def token(app, name: str, fallback: str = "#808080") -> str:
     """Resolve a theme color token to a hex string for use in Rich markup.
 
-    In CSS use ``$name`` directly; this helper is for Python-built markup where
-    CSS variables aren't available.
+    Resolution order: the active theme's variables → the base (vscode-dark)
+    theme's variables → ``fallback``. The base-theme step lets any theme be
+    *partial* — it only needs to override the tokens it wants to change — and
+    means call sites don't have to repeat hex fallbacks. In CSS use ``$name``.
     """
     try:
-        return app.theme_variables.get(name, fallback)
+        val = app.theme_variables.get(name)
+        if val:
+            return val
     except Exception:
-        return fallback
+        pass
+    return VSCODE_DARK.variables.get(name, fallback)

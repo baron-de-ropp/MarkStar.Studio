@@ -125,8 +125,8 @@ class WelcomeScreen(ModalScreen):
         self._recent = recent or []
 
     def _logo_markup(self) -> str:
-        mark = token(self.app, "md-heading", "#569CD6")  # "MARK" — heading color
-        star = token(self.app, "hint-key", "#3794FF")    # "STAR" — accent
+        mark = token(self.app, "md-heading")  # "MARK" — heading color
+        star = token(self.app, "hint-key")    # "STAR" — accent
         lines = [
             f"[{mark}]{m}[/][{star}]{s}[/]" for m, s in zip(_MARK, _STAR)
         ]
@@ -151,7 +151,7 @@ class WelcomeScreen(ModalScreen):
                     Option(self._recent_label(p), id=str(p)) for p in self._recent
                 ]
                 yield OptionList(*options, id="recent-list")
-            hk = token(self.app, "hint-key", "#3794FF")
+            hk = token(self.app, "hint-key")
             yield Static(
                 f"[{hk}]Enter[/] open folder    "
                 f"[{hk}]Ctrl+N[/] new file    "

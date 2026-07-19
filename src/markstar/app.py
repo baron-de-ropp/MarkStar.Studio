@@ -160,19 +160,19 @@ class MarkStarTextArea(TextArea):
         name = getattr(self.app, "theme", None)
         if name == self._style_key and self._styles:
             return self._styles
-        marker = token(self.app, "md-marker", "#6A6A6A")
+        marker = token(self.app, "md-marker")
         self._styles = {
             "marker": Style(color=marker),
-            "strong": Style(color=token(self.app, "md-strong", "#E6E6E6"), bold=True),
-            "emphasis": Style(color=token(self.app, "md-emphasis", "#D4D4D4"), italic=True),
-            "code": Style(color=token(self.app, "md-code", "#CE9178")),
+            "strong": Style(color=token(self.app, "md-strong"), bold=True),
+            "emphasis": Style(color=token(self.app, "md-emphasis"), italic=True),
+            "code": Style(color=token(self.app, "md-code")),
             "strike": Style(color=marker, strike=True),
-            "heading": Style(color=token(self.app, "md-heading", "#569CD6"), bold=True),
-            "quote": Style(color=token(self.app, "md-quote", "#7BA88B"), italic=True),
-            "link": Style(color=token(self.app, "md-link", "#4E9CD6"), underline=True),
-            "search": Style(bgcolor=token(self.app, "search-match", "#515C6A")),
+            "heading": Style(color=token(self.app, "md-heading"), bold=True),
+            "quote": Style(color=token(self.app, "md-quote"), italic=True),
+            "link": Style(color=token(self.app, "md-link"), underline=True),
+            "search": Style(bgcolor=token(self.app, "search-match")),
             "spell": Style(
-                color=token(self.app, "spell-underline", "#D16969"), underline=True
+                color=token(self.app, "spell-underline"), underline=True
             ),
         }
         self._style_key = name
@@ -987,7 +987,7 @@ class MarkStarApp(App[None]):
 
     def _refresh_support_hints(self) -> None:
         """Themed keys + dim labels (labels/pipes inherit $text-muted from CSS)."""
-        hk = token(self, "hint-key", "#007ACC")
+        hk = token(self, "hint-key")
         parts: list[str] = []
         for key, desc in self._SUPPORT_HINTS:
             # Only the key is colored (theme token); description uses widget muted.
@@ -1023,7 +1023,7 @@ class MarkStarApp(App[None]):
         and the │ separator both in the dim rule color. Click bounds recorded
         in ``self._tab_bounds`` = (start, end, close_col, index).
         """
-        dim = token(self, "rule", "#3A3A3A")
+        dim = token(self, "rule")
         chips: list[str] = []
         bounds: list[tuple[int, int, int, int]] = []
         cursor = 0
@@ -1032,9 +1032,9 @@ class MarkStarApp(App[None]):
             name = doc.path.name if doc.path else "Untitled"
             mid = "•" if doc.dirty else " "
             nc = (
-                token(self, "tab-active", "#C8C8C8")
+                token(self, "tab-active")
                 if i == active_index
-                else token(self, "tab-inactive", "#7A7A7A")
+                else token(self, "tab-inactive")
             )
             # Plain form: "   " + name + " " + mid + " " + "×" + " " + "│"
             chips.append(f"[{nc}]   {name} {mid} [/][{dim}]×[/] [{dim}]│[/]")
@@ -2509,7 +2509,7 @@ class _ConfirmDialog(ModalScreen[bool]):
         with Vertical(id="confirm-panel"):
             yield Label(self._title, id="confirm-title")
             yield Label(self._message, id="confirm-message")
-            hk = token(self.app, "hint-key", "#007ACC")
+            hk = token(self.app, "hint-key")
             yield Label(
                 f"[{hk}]Y[/]/Enter {self._yes_label}  ·  "
                 f"[{hk}]N[/]/Esc {self._no_label}",

@@ -169,7 +169,7 @@ class SpellBar(Vertical):
         """Display the current misspelling + suggestions and focus the Fix field."""
         self._suggestions = suggestions
         self._sugg_index = 0
-        spell = token(self.app, "spell-underline", "#D16969")
+        spell = token(self.app, "spell-underline")
         self.query_one("#spell-word", Static).update(f"[{spell} u]{word}[/]")
         self.query_one("#spell-count", Static).update(f"{position}/{total}")
         fix = self.query_one("#spell-fix", SpellInput)
@@ -199,7 +199,7 @@ class SpellBar(Vertical):
         self.post_message(self.SpellRequested("change", value))
 
     def _refresh_hints(self) -> None:
-        hk = token(self.app, "hint-key", "#3794FF")
+        hk = token(self.app, "hint-key")
         parts = [
             ("Enter", "Change"),
             ("↑↓", "Suggestions"),

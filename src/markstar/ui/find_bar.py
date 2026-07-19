@@ -319,7 +319,7 @@ class FindBar(Vertical):
                 ("Ctrl+R", "Replace"),
                 ("Esc", "Close"),
             ]
-        hk = token(self.app, "hint-key", "#007ACC")
+        hk = token(self.app, "hint-key")
         text = "  |  ".join(f"[{hk}]{key}[/] {desc}" for key, desc in parts)
         try:
             self.query_one("#find-hints", Static).update(text)
