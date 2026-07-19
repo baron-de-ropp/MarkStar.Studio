@@ -2116,41 +2116,37 @@ class MarkStarApp(App[None]):
         self._move_caret_to_index(idx)
 
     def action_move_line_up(self) -> None:
-        self._sync_document_from_editor()
+        """Swap the caret's line with the one above via a scoped editor edit, so
+        undo/redo and the document sync work like every other edit (no full
+        reload, no whole-document replace)."""
         editor = self.query_one("#editor", TextArea)
         row, col = editor.cursor_location
         if row <= 0:
             return
-        lines = self.document.text.split("\n")
-        lines[row - 1], lines[row] = lines[row], lines[row - 1]
-        self.document.set_text("\n".join(lines))
-        self._load_active_into_editor()
-        editor.move_cursor((row - 1, min(col, len(lines[row - 1]))))
-        self._refresh_status()
+        above = editor.document.get_line(row - 1)
+        cur = editor.document.get_line(row)
+        editor.replace(f"{cur}\n{above}", (row - 1, 0), (row, len(cur)))
+        editor.move_cursor((row - 1, min(col, len(cur))))
+        editor.focus()
 
     def action_move_line_down(self) -> None:
-        self._sync_document_from_editor()
         editor = self.query_one("#editor", TextArea)
         row, col = editor.cursor_location
-        lines = self.document.text.split("\n")
-        if row >= len(lines) - 1:
+        if row >= editor.document.line_count - 1:
             return
-        lines[row], lines[row + 1] = lines[row + 1], lines[row]
-        self.document.set_text("\n".join(lines))
-        self._load_active_into_editor()
-        editor.move_cursor((row + 1, min(col, len(lines[row + 1]))))
-        self._refresh_status()
+        cur = editor.document.get_line(row)
+        below = editor.document.get_line(row + 1)
+        editor.replace(f"{below}\n{cur}", (row, 0), (row + 1, len(below)))
+        editor.move_cursor((row + 1, min(col, len(cur))))
+        editor.focus()
 
     def action_duplicate_line(self) -> None:
-        self._sync_document_from_editor()
         editor = self.query_one("#editor", TextArea)
         row, col = editor.cursor_location
-        lines = self.document.text.split("\n")
-        lines.insert(row + 1, lines[row])
-        self.document.set_text("\n".join(lines))
-        self._load_active_into_editor()
+        cur = editor.document.get_line(row)
+        editor.insert(f"\n{cur}", (row, len(cur)))
         editor.move_cursor((row + 1, col))
-        self._refresh_status()
+        editor.focus()
 
     def cmd_toggle_soft_wrap(self) -> None:
         editor = self.query_one("#editor", TextArea)
