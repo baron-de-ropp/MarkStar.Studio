@@ -223,3 +223,31 @@ class ProjectPanel(Vertical):
             tree.reload()
         except Exception:
             pass
+
+    def target_dir(self) -> Path:
+        """Folder a new file should land in, based on the tree cursor.
+
+        Cursor on a folder → that folder; on a file → its parent folder;
+        nothing selected → the project root."""
+        try:
+            node = self.query_one(WriterTree).cursor_node
+        except Exception:
+            node = None
+        data = getattr(node, "data", None) if node is not None else None
+        path = getattr(data, "path", None)
+        if path is not None:
+            p = Path(path)
+            try:
+                if p.is_dir():
+                    return p
+                return p.parent
+            except OSError:
+                pass
+        return self._root
+
+    def refresh_tree(self) -> None:
+        """Reload the file tree so newly created files appear."""
+        try:
+            self.query_one(WriterTree).reload()
+        except Exception:
+            pass

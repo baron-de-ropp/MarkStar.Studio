@@ -85,3 +85,21 @@ def test_unknown_command_raises() -> None:
     reg = CommandRegistry()
     with pytest.raises(KeyError, match="unknown"):
         reg.get("nope")
+
+
+def test_is_checked_none_when_not_a_toggle() -> None:
+    cmd = Command(id="save", label="Save", menu="File")
+    assert cmd.is_checked() is None
+
+
+def test_is_checked_reflects_live_state() -> None:
+    state = {"on": True}
+    cmd = Command(
+        id="spell",
+        label="Spellcheck",
+        menu="Tools",
+        checked=lambda: state["on"],
+    )
+    assert cmd.is_checked() is True
+    state["on"] = False
+    assert cmd.is_checked() is False

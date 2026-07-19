@@ -673,6 +673,7 @@ class MarkStarApp(App[None]):
             handler,
             binding: str | None = None,
             enabled=None,
+            checked=None,
         ) -> None:
             r.register(
                 Command(
@@ -682,6 +683,7 @@ class MarkStarApp(App[None]):
                     binding=binding,
                     handler=handler,
                     enabled=enabled,
+                    checked=checked,
                 )
             )
 
@@ -756,7 +758,14 @@ class MarkStarApp(App[None]):
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
         add("toggle_zen", "Zen Mode", "View", self.cmd_toggle_zen)  # menu
-        add("toggle_spellcheck", "Spellcheck", "Tools", self.cmd_toggle_spellcheck)
+        add(
+            "toggle_spellcheck",
+            "Spellcheck",
+            "Tools",
+            self.cmd_toggle_spellcheck,
+            "f7",
+            checked=lambda: self._spell.enabled,
+        )
         add("spelling", "Spelling…", "Tools", self.cmd_spelling)
         add("suggest", "Suggest Correction", "Tools", self.cmd_suggest, "ctrl+g")
         add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
@@ -1284,6 +1293,10 @@ class MarkStarApp(App[None]):
             event.stop()
             self.cmd_suggest()
             return
+        if key == "f7":
+            event.stop()
+            self.cmd_toggle_spellcheck()
+            return
         if key == "ctrl+b":
             event.stop()
             self.cmd_bold()
@@ -1323,12 +1336,68 @@ class MarkStarApp(App[None]):
             pass
 
     def cmd_new_file(self) -> None:
+        # When the project tree has focus, create a named file at the selected
+        # folder location instead of a blank untitled buffer.
+        if isinstance(self.focused, WriterTree):
+            self.run_worker(self._new_file_in_tree())
+            return
         self._sync_document_from_editor()
         self.workspace.new_document()
         self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         self.notify("New file")
+
+    async def _new_file_in_tree(self) -> None:
+        """Prompt for a name (prefilled with the selected folder), create the
+        empty file on disk, open it, and refresh the tree. Never overwrites."""
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+        except Exception:
+            return
+        folder = panel.target_dir()
+        raw = await self.push_screen_wait(
+            PathPrompt(
+                "New file — name it",
+                initial=str(folder) + "/",
+                hint="Enter create · Esc cancel · bare name → .md",
+            )
+        )
+        if raw is None:
+            return
+        path = self._normalize_save_path(raw)
+        if path is None:
+            self.notify("Empty name — nothing created", severity="warning")
+            return
+        existed = path.exists()
+        if existed:
+            if path.is_dir():
+                self.notify(
+                    f"{path.name} is a folder — pick a file name", severity="warning"
+                )
+                return
+            # Never overwrite: open the existing file instead.
+            self.notify(f"{path.name} already exists — opening it", severity="warning")
+        else:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            except OSError as exc:
+                self.notify(f"Create failed: {exc}", severity="error")
+                return
+        self._sync_document_from_editor()
+        try:
+            self.workspace.open_path(path)
+        except OSError as exc:
+            self.notify(f"Open failed: {exc}", severity="error")
+            return
+        self._find.reset()
+        self._load_active_into_editor()
+        self._refresh_status()
+        panel.refresh_tree()
+        self.query_one("#editor", TextArea).focus()
+        if not existed:
+            self.notify(f"Created {path.name}")
 
     def cmd_open_file(self) -> None:
         """Open a path via prompt (file dialog later)."""

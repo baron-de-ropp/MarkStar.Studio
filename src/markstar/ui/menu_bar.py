@@ -192,9 +192,16 @@ class MenuBar(Vertical):
                     .replace("full_stop", ".")
                     .replace("comma", ",")
                 )
+                # Uppercase bare function keys (e.g. "f7" -> "F7").
+                if shortcut and shortcut[0] == "f" and shortcut[1:].isdigit():
+                    shortcut = shortcut.upper()
                 shortcut = f"   {shortcut}"
             disabled = not cmd.is_enabled()
-            label = f"  {cmd.label:<28}{shortcut}"
+            # Toggle commands carry a leading ✓/space marker; the column is
+            # reserved for every row so labels stay aligned down the menu.
+            state = cmd.is_checked()
+            mark = ("✓ " if state else "  ") if state is not None else "  "
+            label = f"  {mark}{cmd.label:<28}{shortcut}"
             options.add_option(Option(label, id=cmd.id, disabled=disabled))
         if options.option_count > 0:
             options.highlighted = 0

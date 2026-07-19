@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "markstar-studio"
-version = "0.2.0"
+version = "0.2.1"
 description = "MarkStar — a Markdown-native terminal word processor (markstar.studio)"
 readme = "README.md"
 license = { text = "MIT" }

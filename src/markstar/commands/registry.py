@@ -20,12 +20,19 @@ class Command:
     binding: Optional[str] = None  # Textual key syntax, e.g. "ctrl+s"
     handler: Optional[HandlerFn] = None
     enabled: Optional[EnabledFn] = None
+    checked: Optional[EnabledFn] = None  # None = not a toggle; else current on/off
     show_in_footer: bool = False
 
     def is_enabled(self) -> bool:
         if self.enabled is None:
             return True
         return bool(self.enabled())
+
+    def is_checked(self) -> Optional[bool]:
+        """None if this command is not a toggle; else its current on/off state."""
+        if self.checked is None:
+            return None
+        return bool(self.checked())
 
 
 @dataclass
