@@ -1,4 +1,4 @@
-"""Prose TUI entrypoint (P0 shell + P1 commands / menus / find)."""
+"""MarkStar TUI entrypoint (P0 shell + P1 commands / menus / find)."""
 
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ from textual import events
 from textual.widgets import Input, Label, Static, TextArea
 from textual.widgets.text_area import Selection
 
-from prose import __version__
-from prose.commands.registry import Command, CommandRegistry
-from prose.domain.document import Document
-from prose.domain.motion import paragraph_down, paragraph_up, word_left, word_right
-from prose.domain.search import (
+from markstar import __version__
+from markstar.commands.registry import Command, CommandRegistry
+from markstar.domain.document import Document
+from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
+from markstar.domain.search import (
     Match,
     find_all,
     find_next,
@@ -31,11 +31,11 @@ from prose.domain.search import (
     replace_match,
     step_find,
 )
-from prose.domain.workspace import Workspace
-from prose.ui.find_bar import FindBar
-from prose.ui.keys import normalize_key
-from prose.ui.menu_bar import MenuBar
-from prose.ui.themes import (
+from markstar.domain.workspace import Workspace
+from markstar.ui.find_bar import FindBar
+from markstar.ui.keys import normalize_key
+from markstar.ui.menu_bar import MenuBar
+from markstar.ui.themes import (
     DEFAULT_THEME_NAME,
     MARKSTAR_LIGHT,
     THEME_NAMES,
@@ -58,7 +58,7 @@ _RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)")
 _RE_STRIKE = re.compile(r"~~([^~\n]+)~~")
 # A fenced-code delimiter line: ``` or ~~~ (3+), optionally indented, with an
 # optional info string (language) after it. Fences span multiple lines, so they
-# are tracked separately (see ProseTextArea._recompute_fences).
+# are tracked separately (see MarkStarTextArea._recompute_fences).
 _RE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
@@ -108,8 +108,8 @@ def _markdown_spans(line: str) -> list[tuple[int, int, str]]:
     return spans
 
 
-class ProseTextArea(TextArea):
-    """Prose editing surface.
+class MarkStarTextArea(TextArea):
+    """MarkStar editing surface.
 
     Narrows the soft-wrap width so text keeps a 5-column right margin while
     the widget itself (and its scrollbar) runs flush to the window edge. Right
@@ -289,10 +289,10 @@ class ProseTextArea(TextArea):
         return line
 
 
-class ProseApp(App[None]):
+class MarkStarApp(App[None]):
     """Writing shell with command registry, menus, and find/replace."""
 
-    TITLE = "Prose"
+    TITLE = "MarkStar"
     # Disable Textual's built-in command palette — we use a classic menu ribbon.
     ENABLE_COMMAND_PALETTE = False
 
@@ -356,7 +356,7 @@ class ProseApp(App[None]):
        The TextArea must have NO right padding: Textual splits the scrollbar off the
        region AFTER shrinking by padding (_compositor.py: region.shrink(styles.gutter)
        then _arrange_scrollbars), so any right pad insets the scrollbar too. The 5-col
-       right text inset comes from ProseTextArea.wrap_width instead. scrollbar-gutter:
+       right text inset comes from MarkStarTextArea.wrap_width instead. scrollbar-gutter:
        stable reserves the bar column even when the document fits, keeping the wrap
        column identical whether or not the bar is drawn. */
     #editor-row {
@@ -377,7 +377,7 @@ class ProseApp(App[None]):
         border: none;
         margin: 0;
         /* No padding at all — left inset is the gutter widget, right inset lives in
-           ProseTextArea.wrap_width so the scrollbar stays flush at the window edge. */
+           MarkStarTextArea.wrap_width so the scrollbar stays flush at the window edge. */
         padding: 0;
         /* Typewriter caret over the writing surface; the mouse-move handler flips
            this to a hand when hovering a Markdown link. */
@@ -616,7 +616,7 @@ class ProseApp(App[None]):
             yield FindBar(id="find-bar")
             with Horizontal(id="editor-row"):
                 yield Static("", id="editor-left-pad")
-                yield ProseTextArea(id="editor")
+                yield MarkStarTextArea(id="editor")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
                     yield Static("", id="status-rule")
@@ -649,7 +649,7 @@ class ProseApp(App[None]):
         self.refresh_bindings()
         self._refresh_support_hints()
 
-        editor = self.query_one("#editor", ProseTextArea)
+        editor = self.query_one("#editor", MarkStarTextArea)
         editor.soft_wrap = True
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
@@ -703,7 +703,7 @@ class ProseApp(App[None]):
         self.document.set_text(new_text)
         self._refresh_status()
         # Fenced code blocks are multi-line — recompute which lines are in a fence.
-        if isinstance(event.text_area, ProseTextArea):
+        if isinstance(event.text_area, MarkStarTextArea):
             event.text_area.recompute_fences()
         # Keep soft find highlights in sync while typing in the buffer.
         try:
@@ -1276,7 +1276,7 @@ class ProseApp(App[None]):
         async def _confirm() -> None:
             ok = await self.push_screen_wait(
                 _ConfirmDialog(
-                    title="Quit Prose?",
+                    title="Quit MarkStar?",
                     message=detail + "\nQuit anyway and discard unsaved work?",
                     yes_label="quit",
                     no_label="stay",
@@ -1693,7 +1693,7 @@ class ProseApp(App[None]):
 
     def cmd_toggle_formatting(self) -> None:
         """Toggle inline Markdown rendering (bold/italic/code shown vs. raw)."""
-        editor = self.query_one("#editor", ProseTextArea)
+        editor = self.query_one("#editor", MarkStarTextArea)
         editor.set_render_markdown(not editor.render_markdown)
         self.notify(
             f"Formatting preview {'on' if editor.render_markdown else 'off'}"
@@ -1708,7 +1708,7 @@ class ProseApp(App[None]):
         self.theme = THEME_NAMES[(idx + 1) % len(THEME_NAMES)]
         # Repaint everything that resolves colors through theme tokens.
         try:
-            self.query_one("#editor", ProseTextArea).refresh_theme_styles()
+            self.query_one("#editor", MarkStarTextArea).refresh_theme_styles()
         except Exception:
             pass
         self._refresh_support_hints()
@@ -1720,7 +1720,7 @@ class ProseApp(App[None]):
         self.notify(f"Theme: {self.theme}")
 
     def cmd_about(self) -> None:
-        self.notify(f"Prose {__version__} — terminal Markdown word processor · MIT")
+        self.notify(f"MarkStar {__version__} — markstar.studio · a Markdown-native homage to WordStar · MIT")
 
     def cmd_keyboard_shortcuts(self) -> None:
         lines = [f"{cmd.binding:18} {cmd.label}" for cmd in self.registry if cmd.binding]
@@ -1739,7 +1739,7 @@ class ProseApp(App[None]):
     @on(FindBar.Dismissed)
     def _on_find_dismissed(self) -> None:
         try:
-            self.query_one("#editor", ProseTextArea).clear_search_highlights()
+            self.query_one("#editor", MarkStarTextArea).clear_search_highlights()
         except Exception:
             pass
         self.query_one("#editor", TextArea).focus()
@@ -1775,7 +1775,7 @@ class ProseApp(App[None]):
     def _refresh_search_highlights(self) -> None:
         """Soft-highlight every match; focused one stays bright via selection."""
         try:
-            editor = self.query_one("#editor", ProseTextArea)
+            editor = self.query_one("#editor", MarkStarTextArea)
             bar = self.query_one("#find-bar", FindBar)
         except Exception:
             return
@@ -1805,7 +1805,7 @@ class ProseApp(App[None]):
         total = len(matches)
         # Keep editor paint in lockstep with the counter.
         try:
-            self.query_one("#editor", ProseTextArea).set_search_highlights(matches)
+            self.query_one("#editor", MarkStarTextArea).set_search_highlights(matches)
         except Exception:
             pass
         if total == 0:
@@ -2059,7 +2059,7 @@ def _terminal_renders_pointer_shapes() -> bool:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="prose", description="Prose — terminal Markdown word processor"
+        prog="markstar", description="MarkStar — terminal Markdown word processor"
     )
     parser.add_argument("path", nargs="?", type=Path, help="Markdown file to open")
     mouse_group = parser.add_mutually_exclusive_group()
@@ -2073,7 +2073,7 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="force mouse capture off (terminal-native I-beam pointer & selection)",
     )
-    parser.add_argument("--version", action="version", version=f"Prose {__version__}")
+    parser.add_argument("--version", action="version", version=f"MarkStar {__version__}")
     args = parser.parse_args(argv)
 
     if args.mouse:
@@ -2085,7 +2085,7 @@ def main(argv: list[str] | None = None) -> None:
         # View > Mouse Capture toggles at runtime either way.
         mouse = _default_mouse_capture()
 
-    app = ProseApp(path=args.path)
+    app = MarkStarApp(path=args.path)
     app.run(mouse=mouse)
 
 

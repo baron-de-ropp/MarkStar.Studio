@@ -6,7 +6,7 @@ import asyncio
 
 from textual.widgets.text_area import Selection
 
-from prose.app import ProseApp
+from markstar.app import MarkStarApp
 
 
 def _run(coro):
@@ -14,7 +14,7 @@ def _run(coro):
 
 
 async def _wrap_case(command: str, text: str, sel: Selection, expected: str) -> str:
-    app = ProseApp()
+    app = MarkStarApp()
     async with app.run_test() as pilot:
         editor = app.query_one("#editor")
         editor.load_text(text)
@@ -41,7 +41,7 @@ def test_strikethrough_wraps_selection() -> None:
 
 def test_heading_prefixes_line() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             editor = app.query_one("#editor")
             editor.load_text("Title")
@@ -55,7 +55,7 @@ def test_heading_prefixes_line() -> None:
 
 def test_bold_with_no_selection_inserts_markers() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             editor = app.query_one("#editor")
             editor.load_text("")

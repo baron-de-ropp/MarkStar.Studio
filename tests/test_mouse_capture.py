@@ -7,7 +7,7 @@ import types
 
 from textual.drivers.linux_driver import LinuxDriver
 
-from prose.app import ProseApp
+from markstar.app import MarkStarApp
 
 
 def _run(coro):
@@ -20,7 +20,7 @@ def test_toggle_mouse_capture_writes_tracking_sequences() -> None:
     """
 
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             drv = app._driver
             writes: list[str] = []
@@ -59,7 +59,7 @@ def test_toggle_mouse_capture_writes_tracking_sequences() -> None:
 def test_default_capture_follows_terminal_capability() -> None:
     from unittest.mock import patch
 
-    from prose.app import _default_mouse_capture, _terminal_renders_pointer_shapes
+    from markstar.app import _default_mouse_capture, _terminal_renders_pointer_shapes
 
     with patch.dict("os.environ", {"TERM": "xterm-256color"}, clear=True):
         assert _terminal_renders_pointer_shapes() is False  # VTE → I-beam default
@@ -68,7 +68,7 @@ def test_default_capture_follows_terminal_capability() -> None:
         assert _terminal_renders_pointer_shapes() is True  # kitty → capture on
 
     # Windows: arrow pointer either way (ms/terminal#1441) → keep clicks.
-    with patch("prose.app.sys") as fake_sys:
+    with patch("markstar.app.sys") as fake_sys:
         fake_sys.platform = "win32"
         with patch.dict("os.environ", {}, clear=True):
             assert _default_mouse_capture() is True
@@ -78,7 +78,7 @@ def test_toggle_survives_driver_without_methods() -> None:
     """Headless driver lacks the methods — the command must not crash."""
 
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             app.registry.execute("toggle_mouse")
             await pilot.pause()

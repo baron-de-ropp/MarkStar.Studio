@@ -13,7 +13,7 @@ def normalize_key(key: str) -> str:
     Textual binding matching is case- and order-sensitive. This makes the
     on_key fallback comparisons robust. (MarkStar's real keymap avoids the
     stacked-modifier chords that made this necessary in the first place; the
-    helper stays for defensive matching in ``ProseApp.on_key``.)
+    helper stays for defensive matching in ``MarkStarApp.on_key``.)
     """
     if not key:
         return key

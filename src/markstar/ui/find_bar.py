@@ -9,8 +9,8 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Input, Static
 
-from prose.ui.keys import normalize_key
-from prose.ui.themes import token
+from markstar.ui.keys import normalize_key
+from markstar.ui.themes import token
 
 
 class FindInput(Input):

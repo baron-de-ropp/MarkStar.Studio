@@ -1,6 +1,6 @@
-# Prose
+# MarkStar
 
-A terminal word processor for long-form Markdown.
+**MarkStar** ([markstar.studio](https://markstar.studio)) — a Markdown-native terminal word processor. A modern homage to WordStar.
 
 **Status:** v0.1 in progress — **P0–P2** (shell, menus/find, **multi-file tabs** + motion).
 
@@ -11,11 +11,11 @@ A terminal word processor for long-form Markdown.
 ## Quick start
 
 ```bash
-cd Applications/prose
+cd Applications/MarkStarStudio
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-prose path/to/file.md    # or: python -m prose.app
+markstar path/to/file.md    # or: python -m markstar.app
 pytest
 ```
 
@@ -44,7 +44,7 @@ pytest
 | Ctrl+Shift+L | Toggle soft wrap |
 | Ctrl+Q | Quit |
 
-Open files from the CLI (`prose chapter.md`). Soft wrap on; status shows word count.
+Open files from the CLI (`markstar chapter.md`). Soft wrap on; status shows word count.
 
 **Menus:** Press **F9**.  
 `Ctrl+Shift+P` is optional and often stolen by the host terminal/IDE before Prose receives it.  

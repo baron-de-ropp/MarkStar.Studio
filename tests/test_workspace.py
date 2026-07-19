@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from prose.domain.document import Document
-from prose.domain.workspace import Workspace
+from markstar.domain.document import Document
+from markstar.domain.workspace import Workspace
 
 
 def test_starts_with_one_empty_document() -> None:

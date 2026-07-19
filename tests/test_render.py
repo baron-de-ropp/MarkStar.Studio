@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from prose.app import ProseApp, ProseTextArea, _markdown_spans
-from prose.ui.themes import token
+from markstar.app import MarkStarApp, MarkStarTextArea, _markdown_spans
+from markstar.ui.themes import token
 
 
 def _run(coro):
@@ -34,9 +34,9 @@ def test_italic_not_matched_inside_bold() -> None:
 
 def test_get_line_applies_bold_style() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
-            ed = app.query_one("#editor", ProseTextArea)
+            ed = app.query_one("#editor", MarkStarTextArea)
             ed.load_text("a **bold** c")
             await pilot.pause()
             line = ed.get_line(0)
@@ -47,9 +47,9 @@ def test_get_line_applies_bold_style() -> None:
 
 def test_toggle_formatting_off_removes_styling() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
-            ed = app.query_one("#editor", ProseTextArea)
+            ed = app.query_one("#editor", MarkStarTextArea)
             ed.load_text("a **bold** c")
             await pilot.pause()
             ed.set_render_markdown(False)
@@ -68,9 +68,9 @@ def test_blockquote_spans() -> None:
 
 def test_fenced_code_block_line_map() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
-            ed = app.query_one("#editor", ProseTextArea)
+            ed = app.query_one("#editor", MarkStarTextArea)
             ed.load_text("pre\n```\nx = 1\n```\npost")
             await pilot.pause()
             return dict(ed._fence_lines)
@@ -102,7 +102,7 @@ def test_link_spans() -> None:
 
 def test_theme_cycle_changes_tokens() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             before = app.theme
             marker_before = token(app, "md-marker")

@@ -124,7 +124,7 @@ Legend: **Menu** = Tier-0 guaranteed path · **Key** = Tier-1 portable shortcut 
 - **`Ctrl+Y` for Redo** — the Windows/classic-editor convention, a clean single `Ctrl`+letter. `Ctrl+Shift+Z` stays as a Mac-muscle-memory alias for capable terminals.
 - **`F4` for Replace All** — a bare F-key is a single unambiguous sequence, unstealable by legacy encoding. F4 avoids the stolen F1/F10/F11. It only needs to fire when the find bar is open, so it can't collide with anything. (Note: `Alt+F4` closes windows on Windows — but *bare* F4 is free.)
 - **`F3` / `Shift+F3` for Find Next/Prev** — the near-universal editor convention. Bare F3 is Tier 1. `Shift+F3` gets its own escape sequence on most terminals (unlike `Ctrl+Shift+letter`), so it's *mostly* portable; the menu and plain `Enter` guarantee coverage where it isn't.
-- **`Ctrl+PageDown`/`Ctrl+PageUp` for tabs** — what browsers and editors use; encodes reliably far more often than `Ctrl+Shift+punctuation`. **Bonus:** this lets us delete the `ProseTextArea` angle-bracket interception hack and the six-spelling `_NEXT_TAB_KEYS`/`_PREV_TAB_KEYS` frozensets — a real simplification.
+- **`Ctrl+PageDown`/`Ctrl+PageUp` for tabs** — what browsers and editors use; encodes reliably far more often than `Ctrl+Shift+punctuation`. **Bonus:** this lets us delete the `MarkStarTextArea` angle-bracket interception hack and the six-spelling `_NEXT_TAB_KEYS`/`_PREV_TAB_KEYS` frozensets — a real simplification.
 - **Move-line / Duplicate / Soft-wrap → menu-primary** — low-frequency power ops. Menu is guaranteed; the `Ctrl+Shift` chord stays as a Tier-2 nicety. (If you want a Tier-1 key for move-line, the only clean single-key options are F-keys — flagged as an open decision below.)
 
 ---

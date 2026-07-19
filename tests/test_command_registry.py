@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from prose.commands.registry import Command, CommandRegistry
+from markstar.commands.registry import Command, CommandRegistry
 
 
 def test_register_and_get() -> None:

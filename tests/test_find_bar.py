@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from prose.app import ProseApp
-from prose.ui.find_bar import FindBar
+from markstar.app import MarkStarApp
+from markstar.ui.find_bar import FindBar
 
 
 def _run(coro):
@@ -14,7 +14,7 @@ def _run(coro):
 
 def test_ctrl_l_replaces_all() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             app.query_one("#editor").load_text("aa bb aa")
             app.document.set_text("aa bb aa")
@@ -36,7 +36,7 @@ def test_ctrl_l_does_not_leak_to_editor_select_all() -> None:
     """Ctrl+L in the replace field must not touch the editor selection."""
 
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             app.query_one("#editor").load_text("aa bb aa")
             app.document.set_text("aa bb aa")
@@ -56,7 +56,7 @@ def test_ctrl_l_does_not_leak_to_editor_select_all() -> None:
 
 def test_enter_in_replace_field_replaces_one() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
             app.query_one("#editor").load_text("aa bb aa")
             app.document.set_text("aa bb aa")

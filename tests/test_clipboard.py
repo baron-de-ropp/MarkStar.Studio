@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from textual.widgets.text_area import Selection
 
-from prose.app import ProseApp
+from markstar.app import MarkStarApp
 
 
 def _run(coro):
@@ -16,10 +16,10 @@ def _run(coro):
 
 def test_ctrl_c_copies_selection_and_never_quits() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         toasts: list = []
         app.notify = lambda *a, **k: toasts.append((a, k))
-        with patch.object(ProseApp, "_native_clipboard_copy") as native:
+        with patch.object(MarkStarApp, "_native_clipboard_copy") as native:
             async with app.run_test() as pilot:
                 ed = app.query_one("#editor")
                 ed.load_text("hello world")
@@ -52,21 +52,21 @@ def test_native_clipboard_platform_dispatch() -> None:
         # X11 branch (this dev machine / CI on Linux with DISPLAY + xclip)
         with patch.dict("os.environ", {"DISPLAY": ":1", "WAYLAND_DISPLAY": ""}):
             with patch("shutil.which", side_effect=lambda t: f"/usr/bin/{t}" if t == "xclip" else None):
-                ProseApp._native_clipboard_copy("x")
+                MarkStarApp._native_clipboard_copy("x")
     assert calls and calls[0][0] == "xclip"
 
     # Windows branch never probes Linux tools.
     calls.clear()
     with patch("subprocess.run", side_effect=lambda cmd, **k: calls.append(cmd)):
-        with patch("prose.app.sys") as fake_sys:
+        with patch("markstar.app.sys") as fake_sys:
             fake_sys.platform = "win32"
-            ProseApp._native_clipboard_copy("x")
+            MarkStarApp._native_clipboard_copy("x")
     assert calls == [["clip"]]
 
     # macOS branch uses pbcopy.
     calls.clear()
     with patch("subprocess.run", side_effect=lambda cmd, **k: calls.append(cmd)):
-        with patch("prose.app.sys") as fake_sys:
+        with patch("markstar.app.sys") as fake_sys:
             fake_sys.platform = "darwin"
-            ProseApp._native_clipboard_copy("x")
+            MarkStarApp._native_clipboard_copy("x")
     assert calls == [["pbcopy"]]

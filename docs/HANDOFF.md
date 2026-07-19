@@ -48,7 +48,7 @@ cd /home/daudzegir/Applications/prose
 ### What is *not* broken
 
 - **Domain logic:** `prose.domain.search.replace_all()` is correct and unit-tested (`tests/test_search.py`).
-- **App command:** `ProseApp.cmd_replace_all()` works when invoked:
+- **App command:** `MarkStarApp.cmd_replace_all()` works when invoked:
   - Syncs editor → document, reads find/replace fields, calls `replace_all`, pushes text back, notifies `Replaced N occurrence(s)`.
 - **Headless pilot proof** (agent ran; code path OK when Textual *receives* the key name):
 
@@ -92,7 +92,7 @@ Hosts that often steal **Ctrl+Shift+R:** browsers (hard reload), IDEs, some term
 | Soft wrap | Alt+Z | Ctrl+Shift+L |
 
 3. **`src/prose/ui/keys.py`:** `normalize_key()` lowercases letter segments + canonicalizes modifier order (`shift+ctrl+r` → `ctrl+shift+r`). `is_replace_all_key()`, `is_save_all_key()`.
-4. **Handlers check replace-all before bare `ctrl+r`** in `FindInput` and `ProseApp.on_key`.
+4. **Handlers check replace-all before bare `ctrl+r`** in `FindInput` and `MarkStarApp.on_key`.
 5. **FindInput** intercepts bulk keys before Textual `Input` defaults (notably Input binds `ctrl+shift+a` → select all, which would eat Save All).
 6. **Docs** (README, design spec key tables, this handoff) updated for no-Alt policy.
 7. **Tests:** 52 passing; `tests/test_keys.py` covers normalize + replace-all/save-all helpers.
@@ -113,7 +113,7 @@ Hosts that often steal **Ctrl+Shift+R:** browsers (hard reload), IDEs, some term
 ```text
 FindInput._on_key / FindBar binding / App binding / App.on_key
   → ReplaceRequested("all") or action_replace_all / action_replace_all_key
-  → ProseApp.cmd_replace_all()
+  → MarkStarApp.cmd_replace_all()
   → domain.replace_all(...)
   → notify "Replaced N occurrence(s)"
 ```
@@ -221,7 +221,7 @@ Uncommitted relative to `origin/main`:
 
 ```
 src/prose/
-  app.py              # ProseApp shell, commands, modals, find wiring, ProseTextArea
+  app.py              # MarkStarApp shell, commands, modals, find wiring, MarkStarTextArea
   commands/registry.py
   domain/
     document.py       # undo/redo buffer, save/load

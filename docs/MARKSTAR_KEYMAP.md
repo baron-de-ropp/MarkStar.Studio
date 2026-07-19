@@ -89,7 +89,7 @@ The WordStar cursor diamond (`Ctrl+E/X/S/D` for arrows, `Ctrl+A/F` word motion, 
 
 Always-on, editable, cheap. `**bold**` renders with **bold** applied to the inner text while the `**` markers stay in place but **dimmed to a muted color**; same for `*italic*`, `` `code` ``, `# headings` (brighter/bold), etc. Because no characters are hidden, there is **no source↔screen offset mapping** — the hard part of a live-preview engine is avoided entirely.
 
-Implementation reuses existing machinery: `ProseTextArea.get_line()` already applies `stylize` to character ranges for search highlights. Markdown spans use the same path — a per-line scan (regex) produces `(start, end, style)` ranges for bold/italic/code/heading, applied in `get_line`. No new rendering pipeline, no cursor remapping.
+Implementation reuses existing machinery: `MarkStarTextArea.get_line()` already applies `stylize` to character ranges for search highlights. Markdown spans use the same path — a per-line scan (regex) produces `(start, end, style)` ranges for bold/italic/code/heading, applied in `get_line`. No new rendering pipeline, no cursor remapping.
 
 Deferred (not now): a read-only full-render toggle (Textual `Markdown` widget), and the Obsidian-style hide-markers-off-cursor-line live preview (that one needs the offset mapping — separate future effort). `Ctrl+P` is left free for whichever of these we add later, if any.
 
@@ -97,7 +97,7 @@ Deferred (not now): a read-only full-render toggle (Textual `Markdown` widget), 
 
 ## 6. What changes from the current code
 
-- **Delete** all `Ctrl+Shift+*` primary bindings, the tab-key frozensets, and the `ProseTextArea` angle-bracket interception hack.
+- **Delete** all `Ctrl+Shift+*` primary bindings, the tab-key frozensets, and the `MarkStarTextArea` angle-bracket interception hack.
 - **Restore** `Ctrl+Q` = Quit; drop the `Ctrl+Shift+P` = menu binding (keep `Esc`/`F9`).
 - **Add** a **Format menu** whose items wrap/insert Markdown around the selection; `Ctrl+B` (bold) and `Ctrl+E` (italic/emphasis) as the two formatting single-keys, the rest menu-only.
 - **Repoint** Replace All → Edit menu + bar buttons (no hotkey); Save All / Save As / Duplicate / Move-line / Soft-wrap → menus.

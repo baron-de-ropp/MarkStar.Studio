@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from prose.domain.document import Document
-from prose.domain.search import (
+from markstar.domain.document import Document
+from markstar.domain.search import (
     find_all,
     find_next,
     find_prev,

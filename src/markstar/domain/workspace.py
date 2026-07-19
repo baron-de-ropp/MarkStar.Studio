@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from prose.domain.document import Document
+from markstar.domain.document import Document
 
 
 class Workspace:

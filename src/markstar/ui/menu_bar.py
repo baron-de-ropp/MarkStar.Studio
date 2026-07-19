@@ -9,7 +9,7 @@ from textual.message import Message
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
-from prose.commands.registry import Command, CommandRegistry
+from markstar.commands.registry import Command, CommandRegistry
 
 
 class MenuBar(Vertical):

@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-17  
 **Repo:** `Applications/prose` (Gitea: `https://source.ryanderopp.com/daudzegir/prose`)  
-**Stack:** Python 3.12, **Textual 8.2.8**, custom `ProseTextArea(TextArea)`  
-**Main UI file:** `src/prose/app.py` (class `ProseApp`, CSS in `CSS = """..."""`)  
+**Stack:** Python 3.12, **Textual 8.2.8**, custom `MarkStarTextArea(TextArea)`  
+**Main UI file:** `src/prose/app.py` (class `MarkStarApp`, CSS in `CSS = """..."""`)  
 **Goal of this doc:** Another model/engineer can fix layout **without** re-deriving the chat history.
 
 ---
@@ -76,7 +76,7 @@ Vertical#main
 ├── FindBar#find-bar
 ├── Horizontal#editor-row       width 100%, height 1fr
 │   ├── Static#editor-left-pad  width: 5
-│   └── ProseTextArea#editor    width: 1fr, padding: 0 4 0 0, scrollbar-size-vertical: 1
+│   └── MarkStarTextArea#editor    width: 1fr, padding: 0 4 0 0, scrollbar-size-vertical: 1
 └── Vertical#bottom-chrome      dock: bottom
     ├── Horizontal#status-rule-row   padding: 0 5
     │   └── Static#status-rule       "─" * width
@@ -87,7 +87,7 @@ Vertical#main
     └── Static#support-pad-bottom
 ```
 
-Rules are redrawn in `ProseApp._update_prose_rules()` after layout using `rule.size.width` and `"─" * width`.
+Rules are redrawn in `MarkStarApp._update_prose_rules()` after layout using `rule.size.width` and `"─" * width`.
 
 ---
 
@@ -140,7 +140,7 @@ From `textual/widget.py` (this install):
 1. **Scrollbar:** 1 cell wide, visually near-invisible until hover, **column W-1** (flush right).
 2. **Prose text wrap width:** last character column of a full-width line should be **W-5** (same as rule end).
 3. **Rules / footer metrics:** already correct with `padding: 0 5` — do not “fix” them by making them full-bleed again.
-4. Prefer CSS/layout structure over fighting `TextArea` internals; subclass `ProseTextArea` is only for key handling today.
+4. Prefer CSS/layout structure over fighting `TextArea` internals; subclass `MarkStarTextArea` is only for key handling today.
 
 ---
 
@@ -165,7 +165,7 @@ From `textual/widget.py` (this install):
 
    **Layout α — padding only (full-width editor):**
    ```text
-   ProseTextArea#editor { width: 1fr; padding: 0 5; scrollbar-size-vertical: 1; }
+   MarkStarTextArea#editor { width: 1fr; padding: 0 5; scrollbar-size-vertical: 1; }
    ```
    Measure whether scrollbar is at `W-1` or `W-1-5`.
 
@@ -263,7 +263,7 @@ where `styles.gutter` = **padding + border** (`textual/css/styles.py:613`). The 
 The escape hatch is `TextArea.wrap_width` (`textual/widgets/_text_area.py:1225`) — a plain property re-read on every rewrap/resize that controls where *text* soft-wraps, independent of the widget box.
 
 1. **CSS `#editor`:** `padding: 0 4 0 0` → `padding: 0` (scrollbar now flush at W-1), and `scrollbar-gutter: auto` → `stable` (reserves the bar column even when the document fits, so the wrap column never shifts by 1 when the bar appears/disappears).
-2. **`ProseTextArea.wrap_width` override:** returns `super().wrap_width - 3` (class constant `EXTRA_RIGHT_MARGIN = 3`). The base value already reserves the scrollbar column (via `scrollable_content_region`) plus 1 cursor cell; 3 more blank columns yields the full 5-column right inset, so text ends at the same column as the rules (`padding: 0 5`).
+2. **`MarkStarTextArea.wrap_width` override:** returns `super().wrap_width - 3` (class constant `EXTRA_RIGHT_MARGIN = 3`). The base value already reserves the scrollbar column (via `scrollable_content_region`) plus 1 cursor cell; 3 more blank columns yields the full 5-column right inset, so text ends at the same column as the rules (`padding: 0 5`).
 
 DOM structure (§3) is unchanged — left gutter widget stays.
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prose.ui.keys import normalize_key
+from markstar.ui.keys import normalize_key
 
 
 def test_normalize_ctrl_letter_case() -> None:

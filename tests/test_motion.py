@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prose.domain.motion import paragraph_down, paragraph_up, word_left, word_right
+from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
 
 
 def test_word_right_and_left() -> None:

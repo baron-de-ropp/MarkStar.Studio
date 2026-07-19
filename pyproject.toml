@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "prose"
+name = "markstar-studio"
 version = "0.1.0"
-description = "A terminal word processor for long-form Markdown"
+description = "MarkStar — a Markdown-native terminal word processor (markstar.studio)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -21,7 +21,7 @@ dev = [
 ]
 
 [project.scripts]
-prose = "prose.app:main"
+markstar = "markstar.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

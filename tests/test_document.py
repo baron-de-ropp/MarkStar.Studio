@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from prose.domain.document import Document
+from markstar.domain.document import Document
 
 
 def test_new_document_is_empty_and_clean() -> None:

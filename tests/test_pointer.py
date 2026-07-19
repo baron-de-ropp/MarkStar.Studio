@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from prose.app import ProseApp, ProseTextArea
+from markstar.app import MarkStarApp, MarkStarTextArea
 
 
 def _run(coro):
@@ -13,9 +13,9 @@ def _run(coro):
 
 def test_editor_and_inputs_use_text_caret() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
-            ed = app.query_one("#editor", ProseTextArea)
+            ed = app.query_one("#editor", MarkStarTextArea)
             app.registry.execute("find")
             await pilot.pause()
             fi = app.query_one("#find-input")
@@ -28,9 +28,9 @@ def test_editor_and_inputs_use_text_caret() -> None:
 
 def test_link_hover_detection() -> None:
     async def go():
-        app = ProseApp()
+        app = MarkStarApp()
         async with app.run_test() as pilot:
-            ed = app.query_one("#editor", ProseTextArea)
+            ed = app.query_one("#editor", MarkStarTextArea)
             ed.load_text("see [my link](https://x.com) here")
             await pilot.pause()
             ed.get_target_document_location = lambda ev: (0, 10)  # inside the link
