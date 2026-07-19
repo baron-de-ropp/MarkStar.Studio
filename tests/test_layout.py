@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from markstar.ui.layout import MIN_PROSE_COLS, ProseLayout, compute_layout
+from markstar.ui.layout import (
+    MIN_PANEL_COLS,
+    MIN_PROSE_COLS,
+    ProseLayout,
+    compute_layout,
+)
 
 
 def _layout(width, panel_open, *, center=True, prose=120, min_panel=40):
@@ -45,10 +50,17 @@ def test_uncentered_fills_available_minus_insets() -> None:
     assert lay.col == 200 - 2 * lay.left_pad
 
 
-def test_panel_clamped_to_keep_min_prose() -> None:
-    # Very narrow window: panel can't eat below MIN_PROSE_COLS of prose room.
+def test_panel_clamped_to_preserve_prose_when_there_is_room() -> None:
+    # Roomy enough: the panel is trimmed so prose keeps >= MIN_PROSE_COLS.
+    lay = _layout(50, panel_open=True, min_panel=40)
+    assert lay.panel <= 50 - MIN_PROSE_COLS
+
+
+def test_panel_floor_wins_on_extremely_narrow_windows() -> None:
+    # Too narrow to honor both: the MIN_PANEL_COLS floor takes over and the
+    # panel simply overlaps the prose (accepted overlay behavior).
     lay = _layout(30, panel_open=True, min_panel=40)
-    assert lay.panel <= 30 - MIN_PROSE_COLS
+    assert lay.panel == MIN_PANEL_COLS
 
 
 def test_returns_named_tuple() -> None:
