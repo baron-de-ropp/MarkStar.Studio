@@ -61,8 +61,11 @@ class WelcomeScreen(ModalScreen):
         content-align: center middle;
         padding: 0 0 1 0;
     }
-    /* One-line wordmark on narrow terminals — give it weight + a little air. */
+    /* One-line wordmark on narrow terminals — span the box and center, give it
+       weight + a little air. (width:auto would shrink to the text and left-align.) */
     #welcome-logo.compact {
+        width: 100%;
+        text-align: center;
         text-style: bold;
         padding: 1 0 1 0;
     }
@@ -140,7 +143,7 @@ class WelcomeScreen(ModalScreen):
             compact = self._should_compact()
         if compact:
             # One-line wordmark for narrow terminals — the block logo would wrap.
-            return f"[{mark}]MARK[/][{star}]★STAR[/]"
+            return f"[{mark}]MARK[/][{star}]STAR ★[/]"
         lines = [
             f"[{mark}]{m}[/][{star}]{s}[/]" for m, s in zip(_MARK, _STAR)
         ]
