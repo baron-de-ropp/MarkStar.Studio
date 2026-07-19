@@ -1482,7 +1482,6 @@ class MarkStarApp(App[None]):
         self.run_worker(self._maybe_restore(path))
 
     def cmd_close(self) -> None:
-        self._sync_document_from_editor()
         was_dirty = self.document.dirty
         self.workspace.close_active()
         self._last_find_end = 0
@@ -1657,7 +1656,6 @@ class MarkStarApp(App[None]):
         self.cmd_prev_tab()
 
     def cmd_save(self) -> None:
-        self._sync_document_from_editor()
         if self.document.path is None:
             self.run_worker(
                 self._prompt_and_save_async(
@@ -1670,7 +1668,6 @@ class MarkStarApp(App[None]):
 
     def cmd_save_as(self) -> None:
         """Save active buffer under a new path (always prompts)."""
-        self._sync_document_from_editor()
         initial = (
             str(self.document.path)
             if self.document.path is not None
@@ -1805,13 +1802,11 @@ class MarkStarApp(App[None]):
         self.run_worker(_confirm())
 
     def cmd_undo(self) -> None:
-        self._sync_document_from_editor()
         if self.document.undo():
             self._push_document_to_editor()
             self._refresh_status()
 
     def cmd_redo(self) -> None:
-        self._sync_document_from_editor()
         if self.document.redo():
             self._push_document_to_editor()
             self._refresh_status()
@@ -1890,7 +1885,6 @@ class MarkStarApp(App[None]):
             self._update_find_count()
 
     def cmd_replace_one(self) -> None:
-        self._sync_document_from_editor()
         bar = self.query_one("#find-bar", FindBar)
         if not bar.is_visible or not bar.is_replace_mode:
             self.cmd_replace()
@@ -1941,7 +1935,6 @@ class MarkStarApp(App[None]):
         Opens the replace bar if needed. Requires a non-empty find string;
         empty replacement is allowed (delete all matches).
         """
-        self._sync_document_from_editor()
         bar = self.query_one("#find-bar", FindBar)
         if not bar.is_visible:
             self.cmd_replace()
@@ -2075,7 +2068,6 @@ class MarkStarApp(App[None]):
         self.run_worker(self._compile_async())
 
     async def _compile_async(self) -> None:
-        self._sync_document_from_editor()
         doc = self.document
         base_dir = doc.path.parent if doc.path else Path.cwd()
         resolve = make_resolver(self._project_root())
@@ -2130,22 +2122,18 @@ class MarkStarApp(App[None]):
         self._refresh_metrics()
 
     def action_word_left(self) -> None:
-        self._sync_document_from_editor()
         idx = word_left(self.document.text, self._cursor_index())
         self._move_caret_to_index(idx)
 
     def action_word_right(self) -> None:
-        self._sync_document_from_editor()
         idx = word_right(self.document.text, self._cursor_index())
         self._move_caret_to_index(idx)
 
     def action_paragraph_up(self) -> None:
-        self._sync_document_from_editor()
         idx = paragraph_up(self.document.text, self._cursor_index())
         self._move_caret_to_index(idx)
 
     def action_paragraph_down(self) -> None:
-        self._sync_document_from_editor()
         idx = paragraph_down(self.document.text, self._cursor_index())
         self._move_caret_to_index(idx)
 
@@ -2341,7 +2329,6 @@ class MarkStarApp(App[None]):
         """Write the active buffer to its `.<name>.autosave` sidecar if dirty."""
         if not self.prefs.autosave:
             return
-        self._sync_document_from_editor()
         doc = self.document
         if doc.path is not None and doc.dirty:
             write_sidecar(doc.path, doc.text)
@@ -2466,7 +2453,6 @@ class MarkStarApp(App[None]):
 
     def _spell_goto(self, from_index: int) -> None:
         """Focus the first misspelling at/after ``from_index``; finish if none."""
-        self._sync_document_from_editor()
         issues = find_misspellings(self.document.text, self._speller.known)
         try:
             self.query_one("#editor", MarkStarTextArea).set_spell_highlights(issues)
@@ -2703,7 +2689,6 @@ class MarkStarApp(App[None]):
         if not bar.is_visible or not bar.query:
             editor.clear_search_highlights()
             return
-        self._sync_document_from_editor()
         matches = find_all(self.document.text, bar.query)
         editor.set_search_highlights(matches)
 
@@ -2721,7 +2706,6 @@ class MarkStarApp(App[None]):
             bar.set_match_count(None, 0)
             self._refresh_search_highlights()
             return
-        self._sync_document_from_editor()
         matches = find_all(self.document.text, query)
         total = len(matches)
         # Keep editor paint in lockstep with the counter.
@@ -2754,7 +2738,6 @@ class MarkStarApp(App[None]):
         *,
         announce_missing: bool = True,
     ) -> None:
-        self._sync_document_from_editor()
         bar = self.query_one("#find-bar", FindBar)
         query = bar.query
         if not query:
