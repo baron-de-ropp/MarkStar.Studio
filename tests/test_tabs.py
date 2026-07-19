@@ -126,6 +126,28 @@ def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
     assert prefs.min_panel_width == 40  # new default
 
 
+def test_zen_mode_hides_and_restores_chrome() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            tab = app.query_one("#tab-strip")
+            foot = app.query_one("#bottom-chrome")
+            before = (tab.display, foot.display)
+            app.cmd_toggle_zen()
+            await pilot.pause()
+            during = (tab.display, foot.display)
+            app.cmd_toggle_zen()
+            await pilot.pause()
+            after = (tab.display, foot.display)
+            return before, during, after
+
+    before, during, after = _run(go())
+    assert before == (True, True)
+    assert during == (False, False)
+    assert after == (True, True)
+
+
 def test_opening_same_document_twice_reuses_tab(tmp_path) -> None:
     (tmp_path / "a.md").write_text("# A")
 

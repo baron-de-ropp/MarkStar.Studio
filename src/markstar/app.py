@@ -768,6 +768,7 @@ class MarkStarApp(App[None]):
         add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
+        add("toggle_zen", "Zen Mode", "View", self.cmd_toggle_zen)  # menu
         add("toggle_spellcheck", "Spellcheck", "Tools", self.cmd_toggle_spellcheck)
         add("spelling", "Spelling…", "Tools", self.cmd_spelling)
         add("suggest", "Suggest Correction", "Tools", self.cmd_suggest, "ctrl+g")
@@ -2535,6 +2536,30 @@ class MarkStarApp(App[None]):
             self.query_one("#editor", TextArea).focus()
         except Exception:
             pass
+
+    def cmd_toggle_zen(self) -> None:
+        """Distraction-free: hide tabs + footer + panel, leave centered prose.
+        (For a truly full-screen canvas, also toggle your terminal's fullscreen,
+        usually F11 — the app can't drive that.)"""
+        self._zen = not getattr(self, "_zen", False)
+        for sel in ("#tab-strip", "#bottom-chrome"):
+            try:
+                self.query_one(sel).display = not self._zen
+            except Exception:
+                pass
+        if self._zen:
+            try:
+                panel = self.query_one("#project-panel", ProjectPanel)
+                if panel.is_open:
+                    panel.close()
+            except Exception:
+                pass
+        self._update_prose_layout()
+        try:
+            self.query_one("#editor", TextArea).focus()
+        except Exception:
+            pass
+        self.notify(f"Zen mode {'on' if self._zen else 'off'} — Esc for the menu")
 
     def cmd_toggle_center(self) -> None:
         """Toggle dynamic centering of the prose column."""
