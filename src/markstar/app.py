@@ -32,6 +32,12 @@ from markstar.domain.search import (
     replace_match,
     step_find,
 )
+from markstar.domain.autosave import (
+    delete_sidecar,
+    read_sidecar,
+    sidecar_is_newer,
+    write_sidecar,
+)
 from markstar.domain.includes import compile_document, make_resolver
 from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
@@ -627,6 +633,7 @@ class MarkStarApp(App[None]):
         self._spellcheck_on = self.prefs.spellcheck
         self._spell_timer = None
         self._spell_current: tuple[int, int, str] | None = None
+        self._autosave_timer = None
         self._build_commands()
 
     @property
@@ -761,6 +768,7 @@ class MarkStarApp(App[None]):
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
         add("toggle_spellcheck", "Spellcheck", "Tools", self.cmd_toggle_spellcheck)
         add("spelling", "Spelling…", "Tools", self.cmd_spelling)
+        add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
         add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
@@ -832,6 +840,7 @@ class MarkStarApp(App[None]):
 
         launch_root: Path | None = None  # folder to open the panel at
         launch_focus_tree = False
+        launch_file: Path | None = None  # file to check for a restore sidecar
         if self._path_arg is not None:
             try:
                 is_dir = self._path_arg.is_dir()
@@ -846,6 +855,7 @@ class MarkStarApp(App[None]):
                 # tree; focus stays in the editor.
                 self.workspace.open_path(self._path_arg)
                 launch_root = self._path_arg.parent
+                launch_file = self._path_arg
             else:
                 self.workspace.active.path = self._path_arg
         self._load_active_into_editor()
@@ -858,6 +868,9 @@ class MarkStarApp(App[None]):
         elif self._path_arg is None and not self.is_headless:
             # Fresh launch (no arg) → welcome screen. Skipped under headless tests.
             self.call_after_refresh(lambda: self.run_worker(self._show_welcome()))
+
+        if launch_file is not None:
+            self.run_worker(self._maybe_restore(launch_file))
 
         if self._spellcheck_on:
             self.call_after_refresh(self._run_spellcheck)
@@ -976,6 +989,7 @@ class MarkStarApp(App[None]):
         if isinstance(event.text_area, MarkStarTextArea):
             event.text_area.recompute_fences()
         self._schedule_spellcheck()
+        self._schedule_autosave()
         # Keep soft find highlights in sync while typing in the buffer.
         try:
             if self.query_one("#find-bar", FindBar).is_visible:
@@ -1308,6 +1322,7 @@ class MarkStarApp(App[None]):
             self.notify(f"Opened {path}")
         else:
             self.notify(f"New buffer for {path} (not on disk yet)")
+        await self._maybe_restore(path)
 
     def cmd_toggle_project_panel(self) -> None:
         """Show/hide the left project-file overlay."""
@@ -1396,6 +1411,7 @@ class MarkStarApp(App[None]):
         self._refresh_status()
         self.query_one("#editor", TextArea).focus()
         self.notify(f"Opened {Path(event.path).name}")
+        self.run_worker(self._maybe_restore(Path(event.path)))
 
     def cmd_close(self) -> None:
         self._sync_document_from_editor()
@@ -1525,6 +1541,7 @@ class MarkStarApp(App[None]):
                 # TextArea (load_text can race and clobber another tab's buffer).
                 try:
                     doc.save()
+                    delete_sidecar(doc.path)
                     saved += 1
                 except OSError as exc:
                     errors += 1
@@ -1605,6 +1622,9 @@ class MarkStarApp(App[None]):
         """Write active buffer. Returns True on success."""
         try:
             self.document.save(path)
+            # Explicit save → the sidecar is now stale; remove it.
+            if self.document.path is not None:
+                delete_sidecar(self.document.path)
             self.notify(f"Saved {self.document.path}")
             self._refresh_status()
             return True
@@ -2270,6 +2290,56 @@ class MarkStarApp(App[None]):
             self.prefs.save()
             self.notify("Mouse captured — click, scroll, and hover enabled")
 
+    # --- Autosave sidecars ---------------------------------------------------
+
+    def _schedule_autosave(self) -> None:
+        """Debounce a sidecar write after the last edit (default 1500 ms)."""
+        if not self.prefs.autosave:
+            return
+        if self._autosave_timer is not None:
+            self._autosave_timer.stop()
+        delay = max(0.1, self.prefs.autosave_ms / 1000)
+        self._autosave_timer = self.set_timer(delay, self._write_sidecar)
+
+    def _write_sidecar(self) -> None:
+        """Write the active buffer to its `.<name>.autosave` sidecar if dirty."""
+        if not self.prefs.autosave:
+            return
+        self._sync_document_from_editor()
+        doc = self.document
+        if doc.path is not None and doc.dirty:
+            write_sidecar(doc.path, doc.text)
+
+    def cmd_toggle_autosave(self) -> None:
+        self.prefs.autosave = not self.prefs.autosave
+        self.prefs.save()
+        if self.prefs.autosave:
+            self._schedule_autosave()
+        self.notify(f"Autosave {'on' if self.prefs.autosave else 'off'}")
+
+    async def _maybe_restore(self, path: Path) -> None:
+        """If a sidecar is newer than ``path``, offer to restore the unsaved work."""
+        if not self.prefs.autosave or not sidecar_is_newer(path):
+            return
+        choice = await self.push_screen_wait(_RestoreDialog(path.name))
+        if choice == "discard":
+            delete_sidecar(path)
+            return
+        if choice != "restore":
+            return  # cancelled — leave the sidecar for next time
+        text = read_sidecar(path)
+        if text is None:
+            return
+        # Apply to the matching open buffer (it becomes dirty vs the file).
+        for i, doc in enumerate(self.workspace.documents):
+            if doc.path is not None and doc.path == path:
+                self.workspace.set_active(i)
+                doc.set_text(text)
+                self._load_active_into_editor()
+                self._refresh_status()
+                self.notify(f"Restored unsaved changes to {path.name}")
+                return
+
     def cmd_toggle_spellcheck(self) -> None:
         """Toggle underlining of misspelled words."""
         self._spellcheck_on = not self._spellcheck_on
@@ -2711,6 +2781,61 @@ class _ConfirmDialog(ModalScreen[bool]):
 
     def action_confirm(self) -> None:
         self.dismiss(True)
+
+
+class _RestoreDialog(ModalScreen[str]):
+    """Recover unsaved autosave work: Restore / Discard (Esc = decide later)."""
+
+    CSS = """
+    _RestoreDialog {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.55);
+    }
+    #restore-panel {
+        width: 66;
+        max-width: 90%;
+        height: auto;
+        background: $boost;
+        border: tall $accent;
+        padding: 1 2;
+    }
+    #restore-title { text-style: bold; color: $text; padding-bottom: 1; }
+    #restore-message { color: $text-muted; padding-bottom: 1; }
+    #restore-hint { color: $text-muted; }
+    """
+
+    BINDINGS = [
+        Binding("escape", "later", show=False, priority=True),
+        Binding("r", "restore", show=False, priority=True),
+        Binding("d", "discard", show=False, priority=True),
+    ]
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self._name = name
+
+    def compose(self) -> ComposeResult:
+        hk = token(self.app, "hint-key")
+        with Vertical(id="restore-panel"):
+            yield Label("Unsaved changes recovered", id="restore-title")
+            yield Label(
+                f'"{self._name}" has newer unsaved changes from a previous '
+                "session (an autosave). Restore them?",
+                id="restore-message",
+            )
+            yield Label(
+                f"[{hk}]R[/] restore  ·  [{hk}]D[/] discard  ·  [{hk}]Esc[/] decide later",
+                id="restore-hint",
+            )
+
+    def action_restore(self) -> None:
+        self.dismiss("restore")
+
+    def action_discard(self) -> None:
+        self.dismiss("discard")
+
+    def action_later(self) -> None:
+        self.dismiss("later")
 
 
 def _terminal_renders_pointer_shapes() -> bool:

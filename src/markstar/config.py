@@ -56,6 +56,8 @@ class Preferences:
     prose_width: int = 120  # max writing-measure columns (line wrap cap)
     center_text: bool = True  # center the prose column in the terminal
     spellcheck: bool = True  # underline unknown words
+    autosave: bool = True  # debounced crash-safety sidecars
+    autosave_ms: int = 1500  # debounce delay
     recent_projects: list = field(default_factory=list)  # last folders (max 5)
     spell_added: list = field(default_factory=list)  # personal dictionary
 
