@@ -840,6 +840,7 @@ class MarkStarApp(App[None]):
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
         self._apply_editor_theme()
+        self._sync_terminal_bg()
 
         launch_root: Path | None = None  # folder to open the panel at
         launch_focus_tree = False
@@ -880,6 +881,9 @@ class MarkStarApp(App[None]):
 
     def on_resize(self, event) -> None:
         self._update_prose_layout()
+
+    def on_unmount(self) -> None:
+        self._reset_terminal_bg()
 
     def _apply_editor_theme(self) -> None:
         """Give the editor a TextArea theme whose background/foreground match the
@@ -2578,10 +2582,38 @@ class MarkStarApp(App[None]):
             f"Formatting preview {'on' if editor.render_markdown else 'off'}"
         )
 
+    def _sync_terminal_bg(self) -> None:
+        """Tell the terminal to use our theme background as *its* default (OSC 11).
+
+        A maximized window's height is rarely an exact multiple of the character
+        cell height, so a thin sub-cell strip of the terminal's own default
+        background shows below the last text row. The app can't paint pixels that
+        aren't a character cell — but OSC 11 makes that strip match our bg instead
+        of showing black. Portable xterm sequence (kitty/Ghostty/WezTerm/iTerm2/
+        Windows Terminal/foot/GNOME honor it; others ignore it harmlessly).
+        """
+        try:
+            bg = self.get_theme(self.theme).background
+            drv = self._driver
+            drv.write(f"\x1b]11;{bg}\x07")
+            drv.flush()
+        except Exception:
+            pass
+
+    def _reset_terminal_bg(self) -> None:
+        """Restore the terminal's default background on exit (OSC 111)."""
+        try:
+            drv = self._driver
+            drv.write("\x1b]111\x07")
+            drv.flush()
+        except Exception:
+            pass
+
     def _apply_theme(self, name: str) -> None:
         """Switch to a theme and repaint everything that resolves theme tokens."""
         self.theme = name
         self._apply_editor_theme()
+        self._sync_terminal_bg()
         try:
             self.query_one("#editor", MarkStarTextArea).refresh_theme_styles()
         except Exception:

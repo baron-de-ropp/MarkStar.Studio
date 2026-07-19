@@ -85,6 +85,28 @@ def test_default_mouse_capture_is_on() -> None:
     assert captured["mouse"] is False
 
 
+def test_terminal_background_synced_via_osc11() -> None:
+    """The app sets the terminal's default bg (OSC 11) to the theme background so
+    the sub-cell strip below the last row matches; OSC 111 resets it on exit."""
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            writes: list[str] = []
+            app._driver.write = lambda d: writes.append(d)
+            app._driver.flush = lambda: None
+            app._sync_terminal_bg()
+            synced = [w for w in writes if "]11;#" in w]
+            writes.clear()
+            app._reset_terminal_bg()
+            return synced, list(writes)
+
+    synced, reset = _run(go())
+    assert synced and synced[0].startswith("\x1b]11;#")
+    assert reset == ["\x1b]111\x07"]
+
+
 def test_pointer_shape_detection() -> None:
     from unittest.mock import patch
 
