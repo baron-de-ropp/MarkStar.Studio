@@ -23,6 +23,13 @@ from markstar.ui.themes import DEFAULT_THEME_NAME, THEME_NAMES
 MOUSE_CHOICES = ("auto", "on", "off")
 
 
+def _clamp_int(value, default: int, lo: int, hi: int) -> int:
+    """Return value if it's an int within [lo, hi], else the default."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return max(lo, min(hi, value))
+
+
 def config_dir() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
@@ -45,6 +52,8 @@ class Preferences:
     mouse: str = "auto"  # auto | on | off
     formatting: bool = True
     soft_wrap: bool = True
+    panel_width: int = 40  # project panel columns
+    prose_width: int = 120  # max writing-measure columns (line wrap cap)
 
     @classmethod
     def load(cls) -> "Preferences":
@@ -65,6 +74,8 @@ class Preferences:
             prefs.formatting = data["formatting"]
         if isinstance(data.get("soft_wrap"), bool):
             prefs.soft_wrap = data["soft_wrap"]
+        prefs.panel_width = _clamp_int(data.get("panel_width"), prefs.panel_width, 15, 80)
+        prefs.prose_width = _clamp_int(data.get("prose_width"), prefs.prose_width, 40, 400)
         return prefs
 
     def save(self) -> None:
@@ -79,8 +90,10 @@ class Preferences:
         lines = ["# MarkStar preferences — safe to hand-edit.", ""]
         for f in fields(self):
             value = getattr(self, f.name)
-            if isinstance(value, bool):
+            if isinstance(value, bool):  # bool before int (bool subclasses int)
                 lines.append(f"{f.name} = {str(value).lower()}")
+            elif isinstance(value, int):
+                lines.append(f"{f.name} = {value}")
             else:
                 lines.append(f'{f.name} = "{value}"')
         return "\n".join(lines) + "\n"

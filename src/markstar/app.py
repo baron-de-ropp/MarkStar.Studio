@@ -139,11 +139,17 @@ class MarkStarTextArea(TextArea):
         self._style_key: str | None = None  # theme name the cache was built for
         # line_index -> "fence" (a ``` delimiter line) | "code" (line inside a fence)
         self._fence_lines: dict[int, str] = {}
+        self.prose_width = 0  # 0 = no cap; else max writing-measure columns
 
     @property
     def wrap_width(self) -> int:
         width = super().wrap_width
-        return max(0, width - self.EXTRA_RIGHT_MARGIN) if width else width
+        width = max(0, width - self.EXTRA_RIGHT_MARGIN) if width else width
+        # getattr: wrap_width is read during super().__init__, before our attr set.
+        cap = getattr(self, "prose_width", 0)
+        if cap and width > cap:
+            width = cap
+        return width
 
     def _theme_styles(self) -> dict[str, Style]:
         """Rich styles for each span kind, resolved from the current theme."""
@@ -298,6 +304,19 @@ class MarkStarTextArea(TextArea):
                 if start_col < end_col:
                     line.stylize(styles["search"], start_col, end_col)
         return line
+
+
+class _TabBar(Static):
+    """The tab ribbon. Clicking a tab activates it; clicking its × closes it.
+
+    Chip layout (plain): ``   {name} {•} × │`` — the app maps a click's column
+    to a tab (and to the × hot-spot) via bounds computed in _refresh_status.
+    """
+
+    def on_click(self, event: events.Click) -> None:
+        app = self.app
+        if hasattr(app, "handle_tab_click"):
+            app.handle_tab_click(event.x)  # type: ignore[attr-defined]
 
 
 class MarkStarApp(App[None]):
@@ -520,6 +539,8 @@ class MarkStarApp(App[None]):
         self._syncing = False
         self.registry = CommandRegistry()
         self._last_find_end = 0
+        # (start, end, close_col, index) per tab chip — for click routing.
+        self._tab_bounds: list[tuple[int, int, int, int]] = []
         self._build_commands()
 
     @property
@@ -643,7 +664,7 @@ class MarkStarApp(App[None]):
             # blank · filename · blank · thin rule · (find) · editor
             with Vertical(id="tab-strip"):
                 yield Static("", id="tab-pad-top")
-                yield Static("   Untitled   |", id="tab-label")  # 3 lead; 3 trail slots; middle → •
+                yield _TabBar("", id="tab-label")  # chips built in _refresh_status
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
@@ -687,6 +708,13 @@ class MarkStarApp(App[None]):
         # Apply saved preferences.
         editor.soft_wrap = self.prefs.soft_wrap
         editor.render_markdown = self.prefs.formatting
+        editor.prose_width = self.prefs.prose_width
+        try:
+            self.query_one("#project-panel", ProjectPanel).styles.width = (
+                self.prefs.panel_width
+            )
+        except Exception:
+            pass
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
@@ -839,24 +867,35 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
 
-    def _format_tab_chip(self, doc: Document, *, active: bool) -> str:
-        name = doc.path.name if doc.path else "Untitled"
-        # Three slots after the name: " _ _ _|" — middle slot is dirty • (stable width)
-        mid = "•" if doc.dirty else " "
-        chip = f"   {name} {mid} |"
-        # Theme tokens: active tab brighter, inactive dimmer.
-        if active:
-            return f"[{token(self, 'tab-active', '#C8C8C8')}]{chip}[/]"
-        return f"[{token(self, 'tab-inactive', '#7A7A7A')}]{chip}[/]"
-
     def _refresh_status(self) -> None:
-        """Tab strip (all open docs), support metrics, and terminal title."""
-        chips = [
-            self._format_tab_chip(doc, active=(i == self.workspace.active_index))
-            for i, doc in enumerate(self.workspace.documents)
-        ]
+        """Tab ribbon (all open docs, clickable), metrics, and terminal title.
+
+        Chip: ``   {name} {•} × │`` — name/dirty in the tab color, the close ×
+        and the │ separator both in the dim rule color. Click bounds recorded
+        in ``self._tab_bounds`` = (start, end, close_col, index).
+        """
+        dim = token(self, "rule", "#3A3A3A")
+        chips: list[str] = []
+        bounds: list[tuple[int, int, int, int]] = []
+        cursor = 0
+        active_index = self.workspace.active_index
+        for i, doc in enumerate(self.workspace.documents):
+            name = doc.path.name if doc.path else "Untitled"
+            mid = "•" if doc.dirty else " "
+            nc = (
+                token(self, "tab-active", "#C8C8C8")
+                if i == active_index
+                else token(self, "tab-inactive", "#7A7A7A")
+            )
+            # Plain form: "   " + name + " " + mid + " " + "×" + " " + "│"
+            chips.append(f"[{nc}]   {name} {mid} [/][{dim}]×[/] [{dim}]│[/]")
+            width = len(name) + 9
+            close_col = cursor + len(name) + 6
+            bounds.append((cursor, cursor + width, close_col, i))
+            cursor += width
+        self._tab_bounds = bounds
         try:
-            self.query_one("#tab-label", Static).update("".join(chips))
+            self.query_one("#tab-label", _TabBar).update("".join(chips))
         except Exception:
             pass
 
@@ -864,6 +903,22 @@ class MarkStarApp(App[None]):
         self.call_after_refresh(self._update_prose_rules)
         name = self.document.path.name if self.document.path else "Untitled"
         self.title = f"{name}{' •' if self.document.dirty else ''}"
+
+    def handle_tab_click(self, x: int) -> None:
+        """Route a click in the tab ribbon: × closes that tab, else activates it."""
+        for start, end, close_col, idx in self._tab_bounds:
+            if start <= x < end:
+                if x == close_col:
+                    self._close_tab_index(idx)
+                elif idx != self.workspace.active_index:
+                    self._switch_tab(lambda i=idx: self.workspace.set_active(i))
+                return
+
+    def _close_tab_index(self, idx: int) -> None:
+        self._sync_document_from_editor()
+        if idx != self.workspace.active_index:
+            self.workspace.set_active(idx)
+        self.cmd_close()
 
     def action_run_command(self, command_id: str) -> None:
         self.registry.execute(command_id)

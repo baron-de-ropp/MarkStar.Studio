@@ -44,7 +44,7 @@ class ProjectPanel(Vertical):
     ProjectPanel {
         dock: left;
         layer: overlay;
-        width: 30;
+        width: 40;
         height: 100%;
         display: none;
         background: $surface;
@@ -70,7 +70,15 @@ class ProjectPanel(Vertical):
         padding: 0 0 0 1;
         background: $surface;
         color: $text-muted;
+        /* Match the editor's subtle scrollbar (same faint thumb). */
         scrollbar-size-vertical: 1;
+        scrollbar-background: $surface;
+        scrollbar-background-hover: $surface;
+        scrollbar-background-active: $surface;
+        scrollbar-color: $text-muted 12%;
+        scrollbar-color-hover: $text-muted 45%;
+        scrollbar-color-active: $text-muted 55%;
+        scrollbar-corner-color: $surface;
     }
 
     ProjectPanel WriterTree > .directory-tree--folder {

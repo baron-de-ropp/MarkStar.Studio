@@ -1,0 +1,88 @@
+"""Clickable tabs (activate + close) and configurable widths."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from markstar.app import MarkStarApp, MarkStarTextArea
+from markstar.config import Preferences
+from markstar.ui.project_panel import ProjectPanel
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _two_tabs(tmp_path: Path):
+    (tmp_path / "a.md").write_text("# A")
+    (tmp_path / "b.md").write_text("# B")
+    return tmp_path
+
+
+def test_click_tab_activates_it(tmp_path) -> None:
+    proj = _two_tabs(tmp_path)
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            app.workspace.open_path(proj / "a.md")
+            app._load_active_into_editor()
+            app.workspace.open_path(proj / "b.md")
+            app._load_active_into_editor()
+            app._refresh_status()
+            await pilot.pause()
+            was = app.workspace.active_index
+            start = app._tab_bounds[0][0]
+            app.handle_tab_click(start + 2)  # body of tab 0
+            await pilot.pause()
+            return was, app.workspace.active_index
+
+    was, now = _run(go())
+    assert was == 1 and now == 0
+
+
+def test_click_close_x_closes_tab(tmp_path) -> None:
+    proj = _two_tabs(tmp_path)
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            app.workspace.open_path(proj / "a.md")
+            app._load_active_into_editor()
+            app.workspace.open_path(proj / "b.md")
+            app._load_active_into_editor()
+            app._refresh_status()
+            await pilot.pause()
+            before = app.workspace.count
+            close_col = app._tab_bounds[1][2]  # × of tab 1
+            app.handle_tab_click(close_col)
+            await pilot.pause()
+            return before, app.workspace.count
+
+    before, after = _run(go())
+    assert before == 2 and after == 1
+
+
+def test_configurable_widths_applied(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
+    Preferences(panel_width=50, prose_width=80).save()
+
+    async def go():
+        app = MarkStarApp(prefs=Preferences.load())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            ed = app.query_one("#editor", MarkStarTextArea)
+            panel = app.query_one("#project-panel", ProjectPanel)
+            return ed.prose_width, int(panel.styles.width.value)
+
+    prose_width, panel_width = _run(go())
+    assert prose_width == 80
+    assert panel_width == 50
+
+
+def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "none.toml"))
+    prefs = Preferences.load()
+    assert prefs.prose_width == 120
+    assert prefs.panel_width == 40  # new default
