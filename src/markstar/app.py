@@ -707,12 +707,6 @@ class MarkStarApp(App[None]):
         editor.soft_wrap = self.prefs.soft_wrap
         editor.render_markdown = self.prefs.formatting
         editor.prose_width = self.prefs.prose_width
-        try:
-            self.query_one("#project-panel", ProjectPanel).styles.width = (
-                self.prefs.panel_width
-            )
-        except Exception:
-            pass
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
@@ -764,9 +758,15 @@ class MarkStarApp(App[None]):
             return base
         return max(base, (width - self.prefs.prose_width) // 2)
 
+    def _panel_width(self, margin: int) -> int:
+        """Project panel width: fill the left margin but stop 5 cols short of the
+        text; never narrower than the configured minimum."""
+        return max(self.prefs.min_panel_width, margin - 5)
+
     def _update_prose_layout(self) -> None:
         """Apply the current margin to every element of the prose frame so tabs,
-        rules, text, and footer share one centered (or fixed) measure."""
+        rules, text, and footer share one centered (or fixed) measure — and align
+        the menu ribbon and grow the project panel to match."""
         margin = self._prose_margin()
         for sel in ("#tab-strip", "#status-rule-row", "#support-row"):
             try:
@@ -778,6 +778,23 @@ class MarkStarApp(App[None]):
                 self.query_one(sel).styles.width = margin
             except Exception:
                 pass
+        # Menu ribbon starts at the same column as the tabs / text.
+        try:
+            self.query_one("#app-menu #menu-names", Static).styles.padding = (0, margin)
+        except Exception:
+            pass
+        try:
+            self.query_one("#app-menu #menu-options").styles.margin = (0, 0, 0, margin)
+        except Exception:
+            pass
+        # Project panel fills the blank left margin (minus a 5-col gap), floored
+        # at the configured minimum width.
+        try:
+            self.query_one("#project-panel", ProjectPanel).styles.width = (
+                self._panel_width(margin)
+            )
+        except Exception:
+            pass
         self.call_after_refresh(self._update_prose_rules)
 
     def _update_prose_rules(self) -> None:

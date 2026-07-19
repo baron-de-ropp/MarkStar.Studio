@@ -52,7 +52,7 @@ class Preferences:
     mouse: str = "auto"  # auto | on | off
     formatting: bool = True
     soft_wrap: bool = True
-    panel_width: int = 40  # project panel columns
+    min_panel_width: int = 40  # project panel min columns (grows to fill margin)
     prose_width: int = 120  # max writing-measure columns (line wrap cap)
     center_text: bool = True  # center the prose column in the terminal
 
@@ -77,7 +77,9 @@ class Preferences:
             prefs.soft_wrap = data["soft_wrap"]
         if isinstance(data.get("center_text"), bool):
             prefs.center_text = data["center_text"]
-        prefs.panel_width = _clamp_int(data.get("panel_width"), prefs.panel_width, 15, 80)
+        prefs.min_panel_width = _clamp_int(
+            data.get("min_panel_width"), prefs.min_panel_width, 15, 80
+        )
         prefs.prose_width = _clamp_int(data.get("prose_width"), prefs.prose_width, 40, 400)
         return prefs
 

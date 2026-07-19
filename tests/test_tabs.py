@@ -66,11 +66,12 @@ def test_click_close_x_closes_tab(tmp_path) -> None:
 
 def test_configurable_widths_applied(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
-    Preferences(panel_width=50, prose_width=80).save()
+    Preferences(min_panel_width=50, prose_width=80).save()
 
     async def go():
         app = MarkStarApp(prefs=Preferences.load())
-        async with app.run_test() as pilot:
+        # Narrow terminal so the margin can't grow the panel past its minimum.
+        async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             ed = app.query_one("#editor", MarkStarTextArea)
             panel = app.query_one("#project-panel", ProjectPanel)
@@ -78,14 +79,32 @@ def test_configurable_widths_applied(tmp_path, monkeypatch) -> None:
 
     prose_width, panel_width = _run(go())
     assert prose_width == 80
-    assert panel_width == 50
+    assert panel_width == 50  # floors at min on a narrow terminal
+
+
+def test_panel_grows_to_fill_margin(tmp_path, monkeypatch) -> None:
+    """On a wide terminal the panel fills the left margin minus a 5-col gap."""
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
+    Preferences(min_panel_width=40, prose_width=120).save()
+
+    async def go():
+        app = MarkStarApp(prefs=Preferences.load())
+        async with app.run_test(size=(220, 24)) as pilot:
+            await pilot.pause()
+            margin = app._prose_margin()  # (220-120)//2 = 50
+            panel = app.query_one("#project-panel", ProjectPanel)
+            return margin, int(panel.styles.width.value)
+
+    margin, panel_width = _run(go())
+    assert margin == 50
+    assert panel_width == 45  # margin - 5, above the 40 minimum
 
 
 def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "none.toml"))
     prefs = Preferences.load()
     assert prefs.prose_width == 120
-    assert prefs.panel_width == 40  # new default
+    assert prefs.min_panel_width == 40  # new default
 
 
 def test_prose_centering_margins() -> None:
