@@ -103,11 +103,10 @@ class MarkStarTextArea(TextArea):
     theme change repaints them. Toggle formatting with ``render_markdown``.
     """
 
-    # Base wrap_width already reserves the scrollbar column (via
-    # scrollable_content_region) and 1 cursor cell; 3 more blank columns makes
-    # the full 5-col right inset, so text ends at the same column as the rules
-    # (which use `padding: 0 5`).
-    EXTRA_RIGHT_MARGIN = 3
+    # Base wrap_width already reserves the scrollbar column + 1 cursor cell, so
+    # text runs flush to the scrollbar with no extra right inset. (Was 3, which
+    # left a visible gap between the wrapped text and the edge.)
+    EXTRA_RIGHT_MARGIN = 0
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
