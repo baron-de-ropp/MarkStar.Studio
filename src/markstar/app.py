@@ -880,9 +880,14 @@ class MarkStarApp(App[None]):
         self._update_prose_layout()
 
     def _apply_editor_theme(self) -> None:
-        """Give the editor a TextArea theme whose background matches the app
-        theme exactly (Textual's built-in vscode_dark paints #1f1f1f, a hair
-        lighter than our $background — that mismatch is visible)."""
+        """Give the editor a TextArea theme whose background/foreground match the
+        active app theme exactly (Textual's built-in vscode_dark paints #1f1f1f,
+        a hair lighter than our $background — that mismatch is visible).
+
+        The editor theme is named per app-theme (``ms-editor-<theme>``) so that
+        setting ``editor.theme`` on a switch is always a real change — a fixed
+        name would no-op and leave a stale background (visible when previewing
+        themes in the picker)."""
         import dataclasses
 
         try:
@@ -892,15 +897,31 @@ class MarkStarApp(App[None]):
             base = TextAreaTheme.get_builtin_theme("vscode_dark")
             if base is None:
                 return
-            bg = self.theme_variables.get("background", "#1E1E1E")
-            fg = self.theme_variables.get("foreground", "#D4D4D4")
+            # Read straight from the Theme object: self.theme_variables lags one
+            # step behind self.theme (it updates on a later refresh), which would
+            # give the editor the *previous* theme's background.
+            theme_obj = self.get_theme(self.theme)
+            if theme_obj is not None:
+                bg = theme_obj.background
+                fg = theme_obj.foreground
+                sel = theme_obj.variables.get("search-match", theme_obj.primary)
+            else:
+                bg, fg, sel = "#1E1E1E", "#D4D4D4", "#264F78"
+            ed_name = f"ms-editor-{self.theme}"
             themed = dataclasses.replace(
                 base,
-                name="markstar-editor",
+                name=ed_name,
                 base_style=Style(color=fg, bgcolor=bg),
+                selection_style=Style(bgcolor=sel),
+                cursor_line_style=Style(bgcolor=bg),
+                gutter_style=Style(color=fg, bgcolor=bg),
+                cursor_line_gutter_style=Style(color=fg, bgcolor=bg),
             )
-            editor.register_theme(themed)
-            editor.theme = "markstar-editor"
+            try:
+                editor.register_theme(themed)
+            except Exception:
+                pass  # already registered under this name
+            editor.theme = ed_name
         except Exception:
             pass
 
