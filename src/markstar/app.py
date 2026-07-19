@@ -24,14 +24,6 @@ from markstar.commands.registry import Command, CommandRegistry
 from markstar.config import Preferences
 from markstar.domain.document import Document
 from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
-from markstar.domain.search import (
-    Match,
-    find_all,
-    find_next,
-    replace_all,
-    replace_match,
-    step_find,
-)
 from markstar.domain.autosave import (
     delete_sidecar,
     read_sidecar,
@@ -60,6 +52,7 @@ from markstar.ui.tab_bar import TabBar, TabInfo
 
 _install_thin_scrollbars()  # slimmer scrollbar glyph, process-wide
 from markstar.ui.find_bar import FindBar
+from markstar.ui.find_controller import FindController
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree, is_openable
@@ -589,7 +582,17 @@ class MarkStarApp(App[None]):
             self.workspace, lambda: self.query_one("#editor", TextArea)
         )
         self.registry = CommandRegistry()
-        self._last_find_end = 0
+        self._find = FindController(
+            get_editor=lambda: self.query_one("#editor", MarkStarTextArea),
+            get_bar=lambda: self.query_one("#find-bar", FindBar),
+            get_document=lambda: self.document,
+            cursor_index=self._cursor_index,
+            select_range=self._select_range,
+            selection_start_index=self._selection_start_index,
+            notify=self.notify,
+            push_editor=self._push_document_to_editor,
+            refresh_status=self._refresh_status,
+        )
         self._speller = Speller(
             self.prefs.spell_added, language=self.prefs.spell_language
         )
@@ -1007,7 +1010,7 @@ class MarkStarApp(App[None]):
         # Keep soft find highlights in sync while typing in the buffer.
         try:
             if self.query_one("#find-bar", FindBar).is_visible:
-                self._refresh_search_highlights()
+                self._find.refresh_highlights()
         except Exception:
             pass
 
@@ -1029,7 +1032,7 @@ class MarkStarApp(App[None]):
         """Sync editor → doc, switch tab via callable, load new doc."""
         self._sync_document_from_editor()
         switcher()
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
 
@@ -1287,7 +1290,7 @@ class MarkStarApp(App[None]):
     def cmd_new_file(self) -> None:
         self._sync_document_from_editor()
         self.workspace.new_document()
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         self.notify("New file")
@@ -1319,7 +1322,7 @@ class MarkStarApp(App[None]):
         except OSError as exc:
             self.notify(f"Open failed: {exc}", severity="error")
             return
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         if path.exists():
@@ -1421,7 +1424,7 @@ class MarkStarApp(App[None]):
         except OSError as exc:
             self.notify(f"Open failed: {exc}", severity="error")
             return
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         self.query_one("#editor", TextArea).focus()
@@ -1431,7 +1434,7 @@ class MarkStarApp(App[None]):
     def cmd_close(self) -> None:
         was_dirty = self.document.dirty
         self.workspace.close_active()
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         if was_dirty:
@@ -1482,7 +1485,7 @@ class MarkStarApp(App[None]):
         self._sync_document_from_editor()
         closed = self.workspace.count - 1
         self.workspace.close_others()
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         self.notify(f"Closed {closed} other tab(s)")
@@ -1519,7 +1522,7 @@ class MarkStarApp(App[None]):
         self._sync_document_from_editor()
         n = self.workspace.count
         self.workspace.close_all()
-        self._last_find_end = 0
+        self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
         self.notify(f"Closed {n} tab(s)")
@@ -1758,11 +1761,12 @@ class MarkStarApp(App[None]):
             self._push_document_to_editor()
             self._refresh_status()
 
+    # Find/Replace commands delegate to the FindController (search state + logic).
     def cmd_find(self) -> None:
-        self._open_find(replace=False)
+        self._find.open(replace=False)
 
     def cmd_replace(self) -> None:
-        self._open_find(replace=True)
+        self._find.open(replace=True)
 
     def action_show_replace(self) -> None:
         self.cmd_replace()
@@ -1774,10 +1778,10 @@ class MarkStarApp(App[None]):
         self.cmd_replace_all()
 
     def cmd_find_next(self) -> None:
-        self._find_direction("next")
+        self._find.find("next")
 
     def cmd_find_prev(self) -> None:
-        self._find_direction("prev")
+        self._find.find("prev")
 
     def action_find_next(self) -> None:
         self.cmd_find_next()
@@ -1785,125 +1789,15 @@ class MarkStarApp(App[None]):
     def action_find_prev(self) -> None:
         self.cmd_find_prev()
 
-    def _open_find(self, *, replace: bool) -> None:
-        """Show find (or replace) bar; seed from single-line selection if any.
-
-        If find is already open and the user asks for replace, expand in place
-        (keep the find string, show the replace row, focus replace field).
-        """
-        bar = self.query_one("#find-bar", FindBar)
-
-        # Already open: expand / refocus without wiping the find string.
-        if bar.is_visible:
-            if replace:
-                if not bar.is_replace_mode:
-                    bar.expand_replace()
-                else:
-                    bar.query_one("#replace-input").focus()
-                if bar.query:
-                    self._update_find_count()
-                return
-            # Ctrl+F while open: focus find field (keep replace row if shown).
-            bar.query_one("#find-input").focus()
-            return
-
-        editor = self.query_one("#editor", TextArea)
-        seed: str | None = None
-        try:
-            selected = editor.selected_text
-        except Exception:
-            selected = ""
-        if selected and "\n" not in selected and len(selected) < 200:
-            seed = selected
-        bar.show(replace=replace, seed=seed)
-        if bar.query:
-            # Jump to first match from caret without requiring Enter first.
-            self._find_direction("next", announce_missing=False)
-            self._update_find_count()
-
     @on(FindBar.ExpandReplace)
     def _on_expand_replace(self, event: FindBar.ExpandReplace) -> None:
-        # FindBar already expanded; keep highlights/count in sync.
-        try:
-            bar = self.query_one("#find-bar", FindBar)
-        except Exception:
-            return
-        if bar.query:
-            self._update_find_count()
+        self._find.on_expand()
 
     def cmd_replace_one(self) -> None:
-        bar = self.query_one("#find-bar", FindBar)
-        if not bar.is_visible or not bar.is_replace_mode:
-            self.cmd_replace()
-            return
-        query = bar.query
-        if not query:
-            self.notify("Enter a find string", severity="warning")
-            return
-        cursor = self._cursor_index()
-        # Prefer replacing the current selection if it is exactly the match.
-        editor = self.query_one("#editor", TextArea)
-        try:
-            selected = editor.selected_text
-        except Exception:
-            selected = ""
-        match = None
-        if selected and selected.lower() == query.lower():
-            # Selection is the match — use its span.
-            start = self._selection_start_index()
-            if start is not None:
-                match = Match(start, start + len(selected))
-        if match is None:
-            match = find_next(self.document.text, query, start=cursor)
-        if match is None:
-            match = find_next(self.document.text, query, start=0)
-        if match is None:
-            self.notify(f"Not found: {query!r}", severity="warning")
-            self._update_find_count()
-            return
-        new_m = replace_match(self.document, match, bar.replacement)
-        self._push_document_to_editor()
-        self._last_find_end = new_m.end
-        # Advance to the next occurrence after the replacement.
-        nxt = find_next(self.document.text, query, start=new_m.end)
-        if nxt is None and new_m.end > 0:
-            nxt = find_next(self.document.text, query, start=0)
-        if nxt is not None:
-            self._select_range(nxt.start, nxt.end)
-            self._last_find_end = nxt.end
-        else:
-            self._select_range(new_m.start, new_m.end)
-        self._refresh_status()
-        self._update_find_count()
+        self._find.replace_one()
 
     def cmd_replace_all(self) -> None:
-        """Replace every match of the find string with the replace field.
-
-        Opens the replace bar if needed. Requires a non-empty find string;
-        empty replacement is allowed (delete all matches).
-        """
-        bar = self.query_one("#find-bar", FindBar)
-        if not bar.is_visible:
-            self.cmd_replace()
-            # User still needs a find string; don't replace blindly.
-            if not bar.query:
-                self.notify(
-                    "Enter a find string, then use Replace All",
-                    severity="warning",
-                )
-                return
-        elif not bar.is_replace_mode:
-            bar.expand_replace()
-        query = bar.query
-        if not query:
-            self.notify("Enter a find string", severity="warning")
-            return
-        n = replace_all(self.document, query, bar.replacement)
-        self._push_document_to_editor()
-        self._last_find_end = 0
-        self._refresh_status()
-        self._update_find_count()
-        self.notify(f"Replaced {n} occurrence(s)")
+        self._find.replace_all()
 
     def cmd_select_all(self) -> None:
         self.query_one("#editor", TextArea).select_all()
@@ -2588,7 +2482,7 @@ class MarkStarApp(App[None]):
 
     @on(FindBar.Submitted)
     def _on_find_submitted(self, event: FindBar.Submitted) -> None:
-        self._find_direction(event.direction)
+        self._find.find(event.direction)
 
     @on(FindBar.Dismissed)
     def _on_find_dismissed(self) -> None:
@@ -2607,12 +2501,7 @@ class MarkStarApp(App[None]):
 
     @on(FindBar.QueryChanged)
     def _on_find_query_changed(self, event: FindBar.QueryChanged) -> None:
-        self._last_find_end = 0
-        self._update_find_count()
-        if event.query:
-            self._find_direction("next", announce_missing=False)
-        else:
-            self._refresh_search_highlights()
+        self._find.on_query_changed(event.query)
 
     def _selection_start_index(self) -> int | None:
         editor = self.query_one("#editor", TextArea)
@@ -2625,107 +2514,6 @@ class MarkStarApp(App[None]):
             return min(a, b)
         except Exception:
             return None
-
-    def _refresh_search_highlights(self) -> None:
-        """Soft-highlight every match; focused one stays bright via selection."""
-        try:
-            editor = self.query_one("#editor", MarkStarTextArea)
-            bar = self.query_one("#find-bar", FindBar)
-        except Exception:
-            return
-        if not bar.is_visible or not bar.query:
-            editor.clear_search_highlights()
-            return
-        matches = find_all(self.document.text, bar.query)
-        editor.set_search_highlights(matches)
-
-    def _update_find_count(self) -> None:
-        """Refresh the ``n/total`` badge on the find bar and soft highlights."""
-        try:
-            bar = self.query_one("#find-bar", FindBar)
-        except Exception:
-            return
-        if not bar.is_visible:
-            self._refresh_search_highlights()
-            return
-        query = bar.query
-        if not query:
-            bar.set_match_count(None, 0)
-            self._refresh_search_highlights()
-            return
-        matches = find_all(self.document.text, query)
-        total = len(matches)
-        # Keep editor paint in lockstep with the counter.
-        try:
-            self.query_one("#editor", MarkStarTextArea).set_search_highlights(matches)
-        except Exception:
-            pass
-        if total == 0:
-            bar.set_match_count(None, 0)
-            return
-        # 1-based index of match that starts at/near the current selection start.
-        cursor = self._cursor_index()
-        current: int | None = None
-        for i, m in enumerate(matches):
-            if m.start <= cursor < m.end or m.start == cursor or (
-                self._last_find_end and m.end == self._last_find_end
-            ):
-                current = i + 1
-                break
-        if current is None and self._last_find_end:
-            for i, m in enumerate(matches):
-                if m.end == self._last_find_end:
-                    current = i + 1
-                    break
-        bar.set_match_count(current, total)
-
-    def _find_direction(
-        self,
-        direction: str,
-        *,
-        announce_missing: bool = True,
-    ) -> None:
-        bar = self.query_one("#find-bar", FindBar)
-        query = bar.query
-        if not query:
-            if announce_missing:
-                self.notify("Enter a find string", severity="warning")
-            if not bar.is_visible:
-                bar.show(replace=False)
-            return
-
-        text = self.document.text
-        cursor = self._cursor_index()
-
-        # Prefer the start of the currently selected match as the step origin.
-        current_start: int | None = None
-        try:
-            selected = self.query_one("#editor", TextArea).selected_text
-        except Exception:
-            selected = ""
-        if selected and selected.lower() == query.lower():
-            current_start = self._selection_start_index()
-        if current_start is None and self._last_find_end:
-            # Reconstruct start from last focused end + query length.
-            current_start = max(0, self._last_find_end - len(query))
-
-        match = step_find(
-            text,
-            query,
-            direction=direction,
-            cursor=cursor,
-            current_start=current_start,
-        )
-
-        if match is None:
-            if announce_missing:
-                self.notify(f"Not found: {query!r}", severity="warning")
-            self._update_find_count()
-            return
-
-        self._last_find_end = match.end
-        self._select_range(match.start, match.end)
-        self._update_find_count()
 
 
 def _terminal_renders_pointer_shapes() -> bool:
