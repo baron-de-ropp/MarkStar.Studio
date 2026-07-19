@@ -38,6 +38,7 @@ from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree
+from markstar.ui.spell_bar import SpellBar
 from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
     DEFAULT_THEME_NAME,
@@ -582,6 +583,7 @@ class MarkStarApp(App[None]):
         self._speller = Speller(self.prefs.spell_added)
         self._spellcheck_on = self.prefs.spellcheck
         self._spell_timer = None
+        self._spell_current: tuple[int, int, str] | None = None
         self._build_commands()
 
     @property
@@ -713,6 +715,7 @@ class MarkStarApp(App[None]):
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
         add("toggle_spellcheck", "Spellcheck", "Tools", self.cmd_toggle_spellcheck)
+        add("spelling", "Spelling…", "Tools", self.cmd_spelling)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
         add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
@@ -738,6 +741,7 @@ class MarkStarApp(App[None]):
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
+            yield SpellBar(id="spell-bar")
             with Horizontal(id="editor-row"):
                 yield ProjectPanel(self._project_root(), id="project-panel")
                 yield Static("", id="editor-left-pad")
@@ -1091,6 +1095,14 @@ class MarkStarApp(App[None]):
             find = self.query_one("#find-bar", FindBar)
             if find.is_visible:
                 find.hide()
+                return
+        except Exception:
+            pass
+
+        try:
+            spell = self.query_one("#spell-bar", SpellBar)
+            if spell.is_visible:
+                spell.hide()
                 return
         except Exception:
             pass
@@ -2105,6 +2117,71 @@ class MarkStarApp(App[None]):
     def _apply_spell(self, matches: list[Match]) -> None:
         try:
             self.query_one("#editor", MarkStarTextArea).set_spell_highlights(matches)
+        except Exception:
+            pass
+
+    # --- Interactive spelling (find-bar-style SpellBar) ----------------------
+
+    def cmd_spelling(self) -> None:
+        """Open the spelling bar and step to the first misspelling."""
+        self._spell_goto(0)
+
+    def _spell_goto(self, from_index: int) -> None:
+        """Focus the first misspelling at/after ``from_index``; finish if none."""
+        self._sync_document_from_editor()
+        issues = find_misspellings(self.document.text, self._speller.known)
+        try:
+            self.query_one("#editor", MarkStarTextArea).set_spell_highlights(issues)
+        except Exception:
+            pass
+        bar = self.query_one("#spell-bar", SpellBar)
+        for i, m in enumerate(issues):
+            if m.start >= from_index:
+                word = self.document.text[m.start : m.end]
+                self._spell_current = (m.start, m.end, word)
+                self._select_range(m.start, m.end)
+                bar.show_word(
+                    word, self._speller.suggestions(word), i + 1, len(issues)
+                )
+                return
+        # Nothing left from here.
+        self._spell_current = None
+        if bar.is_visible:
+            bar.hide()
+        self.notify(
+            "No misspellings" if not issues else "Spelling check complete"
+        )
+        self.query_one("#editor", TextArea).focus()
+
+    @on(SpellBar.SpellRequested)
+    def _on_spell_requested(self, event: SpellBar.SpellRequested) -> None:
+        if self._spell_current is None:
+            return
+        start, end, word = self._spell_current
+        if event.action == "change":
+            new = event.value
+            editor = self.query_one("#editor", TextArea)
+            try:
+                s = editor.document.get_location_from_index(start)
+                e = editor.document.get_location_from_index(end)
+                editor.replace(new, s, e)
+            except Exception:
+                return
+            self._spell_goto(start + len(new))
+        elif event.action == "skip":
+            self._speller.ignore(word)
+            self._spell_goto(end)
+        elif event.action == "add":
+            self._speller.add(word)
+            self.prefs.spell_added = self._speller.added_words
+            self.prefs.save()
+            self._spell_goto(end)
+
+    @on(SpellBar.Dismissed)
+    def _on_spell_dismissed(self) -> None:
+        self._spell_current = None
+        try:
+            self.query_one("#editor", TextArea).focus()
         except Exception:
             pass
 
