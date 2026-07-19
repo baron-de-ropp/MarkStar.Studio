@@ -12,6 +12,10 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+# Anchored-popup sizing (used by the spell suggest flow to place this popup).
+POPUP_WIDTH = 42
+MAX_ROWS = 12
+
 
 class SuggestPopup(ModalScreen[str]):
     """Floating suggestion list anchored near the caret.

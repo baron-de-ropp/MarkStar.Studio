@@ -42,7 +42,7 @@ from markstar.domain.markdown import (
     toggle_emphasis,
     word_bounds,
 )
-from markstar.domain.spellcheck import Speller, find_misspellings
+from markstar.domain.spellcheck import Speller
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.editor_session import EditorSession
@@ -57,7 +57,7 @@ from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree, is_openable
 from markstar.ui.spell_bar import SpellBar
-from markstar.ui.suggest_popup import SuggestPopup
+from markstar.ui.spell_controller import SpellController
 from markstar.ui.theme_picker import ThemePicker
 from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
@@ -75,9 +75,7 @@ from markstar.ui.themes import (
 # Footer metrics compaction thresholds (see _refresh_metrics).
 _METRICS_NARROW = 66          # below: drop the least-important metric
 _METRICS_MEDIUM = 92          # below: compact labels
-# Anchored popups (spell suggestions, theme picker).
-_POPUP_WIDTH = 42
-_SUGGEST_MAX_ROWS = 12
+# (Spell suggestion popup sizing lives in ui/suggest_popup.)
 # Terminal control (OSC): set/reset the default background so the sub-cell strip
 # below the last row matches the theme instead of the terminal default.
 _OSC_SET_BG = "\x1b]11;{bg}\x07"
@@ -593,14 +591,31 @@ class MarkStarApp(App[None]):
             push_editor=self._push_document_to_editor,
             refresh_status=self._refresh_status,
         )
-        self._speller = Speller(
-            self.prefs.spell_added, language=self.prefs.spell_language
+        self._spell = SpellController(
+            prefs=self.prefs,
+            get_editor=lambda: self.query_one("#editor", MarkStarTextArea),
+            get_bar=lambda: self.query_one("#spell-bar", SpellBar),
+            get_document=lambda: self.document,
+            select_range=self._select_range,
+            # Late-bound so tests that patch these on the app still take effect.
+            notify=lambda *a, **k: self.notify(*a, **k),
+            set_timer=lambda *a, **k: self.set_timer(*a, **k),
+            run_worker=lambda *a, **k: self.run_worker(*a, **k),
+            call_from_thread=lambda *a, **k: self.call_from_thread(*a, **k),
+            push_screen_wait=lambda *a, **k: self.push_screen_wait(*a, **k),
+            screen_size=lambda: self.size,
         )
-        self._spellcheck_on = self.prefs.spellcheck
-        self._spell_timer = None
-        self._spell_current: tuple[int, int, str] | None = None
         self._autosave_timer = None
         self._build_commands()
+
+    # Compat accessors so callers/tests keep reaching the speller + walk state.
+    @property
+    def _speller(self) -> Speller:
+        return self._spell.speller
+
+    @property
+    def _spell_current(self):
+        return self._spell.current
 
     @property
     def document(self) -> Document:
@@ -843,8 +858,8 @@ class MarkStarApp(App[None]):
         if launch_file is not None:
             self.run_worker(self._maybe_restore(launch_file))
 
-        if self._spellcheck_on:
-            self.call_after_refresh(self._run_spellcheck)
+        if self._spell.enabled:
+            self.call_after_refresh(self._spell.run)
 
     def on_resize(self, event) -> None:
         # Use the size the event carries, not self.size — the latter isn't updated
@@ -2204,164 +2219,33 @@ class MarkStarApp(App[None]):
                 self.notify(f"Restored unsaved changes to {path.name}")
                 return
 
+    # Spellcheck commands delegate to the SpellController (state + coordination).
     def cmd_suggest(self) -> None:
-        """Pop a suggestion list at the caret for the misspelled word under it."""
-        editor = self.query_one("#editor", MarkStarTextArea)
-        row, col = editor.cursor_location
-        line = editor.document.get_line(row)
-        a, b = word_bounds(line, col)
-        if a == b:
-            self.notify("Put the caret on a word first")
-            return
-        word = line[a:b]
-        if self._speller.known(word):
-            self.notify(f"“{word}” is spelled correctly")
-            return
-        # Open the flyout even with no suggestions — the Add/Ignore actions are
-        # always available (e.g. for a correctly-spelled name or bit of jargon).
-        suggestions = self._speller.suggestions(word)
-        off = editor.cursor_screen_offset
-        self.run_worker(self._suggest_async(row, a, b, word, suggestions, off))
+        self._spell.suggest()
 
-    async def _suggest_async(
-        self, row, a, b, word, suggestions, off
-    ) -> None:
-        # Anchor just below the caret; flip above if it would run off the bottom.
-        popup_h = min(len(suggestions) + 2, _SUGGEST_MAX_ROWS)
-        y = off.y + 1
-        if y + popup_h > self.size.height:
-            y = max(0, off.y - popup_h)
-        x = max(0, min(off.x, self.size.width - _POPUP_WIDTH))
-        chosen = await self.push_screen_wait(
-            SuggestPopup(word, suggestions, (x, y))
-        )
-        if not chosen:
-            return
-        editor = self.query_one("#editor", TextArea)
-        if chosen == SuggestPopup.ADD:
-            self._speller.add(word)
-            self.prefs.spell_added = self._speller.added_words
-            self.prefs.save()
-            self.notify(f"Added “{word}” to your dictionary")
-            self._run_spellcheck()  # drop the underline now that it's known
-            editor.focus()
-            return
-        if chosen == SuggestPopup.IGNORE:
-            self._speller.ignore(word)
-            self.notify(f"Ignoring “{word}” this session")
-            self._run_spellcheck()
-            editor.focus()
-            return
-        # Recompute the span (nothing else could edit while the modal was up).
-        line = editor.document.get_line(row)
-        if line[a:b] == word:
-            editor.replace(chosen, (row, a), (row, b))
-        editor.focus()
+    def _suggest_async(self, row, a, b, word, suggestions, off):
+        # Thin passthrough kept for the existing tests; returns the coroutine.
+        return self._spell.suggest_async(row, a, b, word, suggestions, off)
 
     def cmd_toggle_spellcheck(self) -> None:
-        """Toggle underlining of misspelled words."""
-        self._spellcheck_on = not self._spellcheck_on
-        self.prefs.spellcheck = self._spellcheck_on
-        self.prefs.save()
-        if self._spellcheck_on:
-            self._run_spellcheck()
-        else:
-            try:
-                self.query_one("#editor", MarkStarTextArea).clear_spell_highlights()
-            except Exception:
-                pass
-        self.notify(f"Spellcheck {'on' if self._spellcheck_on else 'off'}")
+        self._spell.toggle()
 
     def _schedule_spellcheck(self) -> None:
-        """Debounce a re-check ~0.6s after the last edit."""
-        if not self._spellcheck_on:
-            return
-        if self._spell_timer is not None:
-            self._spell_timer.stop()
-        delay = max(0.1, self.prefs.spellcheck_ms / 1000)
-        self._spell_timer = self.set_timer(delay, self._run_spellcheck)
+        self._spell.schedule()
 
     def _run_spellcheck(self) -> None:
-        if not self._spellcheck_on:
-            return
-        text = self.document.text
-
-        def work() -> None:
-            # Dictionary loads lazily here — off the UI thread on first use.
-            matches = find_misspellings(text, self._speller.known)
-            self.call_from_thread(self._apply_spell, matches)
-
-        self.run_worker(work, thread=True, exclusive=True, group="spell")
-
-    def _apply_spell(self, matches: list[Match]) -> None:
-        try:
-            self.query_one("#editor", MarkStarTextArea).set_spell_highlights(matches)
-        except Exception:
-            pass
-
-    # --- Interactive spelling (find-bar-style SpellBar) ----------------------
+        self._spell.run()
 
     def cmd_spelling(self) -> None:
-        """Open the spelling bar and step to the first misspelling."""
-        self._spell_goto(0)
-
-    def _spell_goto(self, from_index: int) -> None:
-        """Focus the first misspelling at/after ``from_index``; finish if none."""
-        issues = find_misspellings(self.document.text, self._speller.known)
-        try:
-            self.query_one("#editor", MarkStarTextArea).set_spell_highlights(issues)
-        except Exception:
-            pass
-        bar = self.query_one("#spell-bar", SpellBar)
-        for i, m in enumerate(issues):
-            if m.start >= from_index:
-                word = self.document.text[m.start : m.end]
-                self._spell_current = (m.start, m.end, word)
-                self._select_range(m.start, m.end)
-                bar.show_word(
-                    word, self._speller.suggestions(word), i + 1, len(issues)
-                )
-                return
-        # Nothing left from here.
-        self._spell_current = None
-        if bar.is_visible:
-            bar.hide()
-        self.notify(
-            "No misspellings" if not issues else "Spelling check complete"
-        )
-        self.query_one("#editor", TextArea).focus()
+        self._spell.start_walk()
 
     @on(SpellBar.SpellRequested)
     def _on_spell_requested(self, event: SpellBar.SpellRequested) -> None:
-        if self._spell_current is None:
-            return
-        start, end, word = self._spell_current
-        if event.action == "change":
-            new = event.value
-            editor = self.query_one("#editor", TextArea)
-            try:
-                s = editor.document.get_location_from_index(start)
-                e = editor.document.get_location_from_index(end)
-                editor.replace(new, s, e)
-            except Exception:
-                return
-            self._spell_goto(start + len(new))
-        elif event.action == "skip":
-            self._speller.ignore(word)
-            self._spell_goto(end)
-        elif event.action == "add":
-            self._speller.add(word)
-            self.prefs.spell_added = self._speller.added_words
-            self.prefs.save()
-            self._spell_goto(end)
+        self._spell.on_request(event.action, event.value)
 
     @on(SpellBar.Dismissed)
     def _on_spell_dismissed(self) -> None:
-        self._spell_current = None
-        try:
-            self.query_one("#editor", TextArea).focus()
-        except Exception:
-            pass
+        self._spell.on_dismissed()
 
     def cmd_toggle_zen(self) -> None:
         """Distraction-free: empty the tab ribbon and footer text (but keep their
