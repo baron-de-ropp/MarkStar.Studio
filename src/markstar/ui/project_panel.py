@@ -116,7 +116,7 @@ class ProjectPanel(Vertical):
         border-right: solid $accent 40%;
         border-bottom: solid $accent 40%;
         border-title-color: $text;
-        border-title-align: left;
+        border-title-align: center;
     }
 
     ProjectPanel.visible {
