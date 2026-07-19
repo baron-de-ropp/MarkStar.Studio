@@ -33,7 +33,7 @@ def test_toggle_mouse_capture_writes_tracking_sequences() -> None:
                 LinuxDriver._disable_mouse_support, drv
             )
 
-            app.registry.execute("toggle_mouse")
+            app.cmd_toggle_mouse_capture()
             await pilot.pause()
             released = (
                 drv._mouse is False
@@ -42,7 +42,7 @@ def test_toggle_mouse_capture_writes_tracking_sequences() -> None:
             )
 
             writes.clear()
-            app.registry.execute("toggle_mouse")
+            app.cmd_toggle_mouse_capture()
             await pilot.pause()
             recaptured = (
                 drv._mouse is True
@@ -102,10 +102,10 @@ def test_toggle_survives_driver_without_methods() -> None:
     async def go():
         app = MarkStarApp()
         async with app.run_test() as pilot:
-            app.registry.execute("toggle_mouse")
+            app.cmd_toggle_mouse_capture()
             await pilot.pause()
             state_off = app._driver._mouse
-            app.registry.execute("toggle_mouse")
+            app.cmd_toggle_mouse_capture()
             await pilot.pause()
             return state_off, app._driver._mouse
 

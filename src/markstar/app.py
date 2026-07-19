@@ -773,7 +773,6 @@ class MarkStarApp(App[None]):
         add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
-        add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
 
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
         add("about", "About…", "Help", self.cmd_about)
