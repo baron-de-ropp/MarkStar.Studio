@@ -15,7 +15,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Input, Static
+from textual.widgets import Input, Rule, Static
 
 from markstar.ui.themes import token
 
@@ -52,8 +52,11 @@ class StarBotPanel(Vertical):
     }
     StarBotPanel .sb-msg { height: auto; padding: 0 0 1 0; }
     StarBotPanel #sb-spinner { height: auto; color: $text-muted; }
-    /* A blank breathing row sits above the rule (see compose). */
-    StarBotPanel #sb-rule { height: 1; color: $text-muted 22%; }
+    /* A blank breathing row sits above the rule (see compose). The Rule widget
+       auto-fills the panel's content width, so it always spans the chat area. */
+    StarBotPanel #sb-rule {
+        height: 1; margin: 0; color: $text-muted 22%; background: $boost;
+    }
     StarBotPanel #sb-input {
         /* Recessed, slightly darker field so the input reads as distinct. */
         border: none; padding: 0 1; height: auto; background: $background;
@@ -83,7 +86,7 @@ class StarBotPanel(Vertical):
         yield VerticalScroll(id="sb-log")
         yield Static("", id="sb-spinner")
         yield Static("", id="sb-breath")  # breathing row below the transcript
-        yield Static("─" * 40, id="sb-rule")
+        yield Rule(id="sb-rule")  # auto-fills the panel width
         yield Input(placeholder="ask StarBot…", id="sb-input")
         yield Static("", id="sb-foot")
         yield Static("", id="sb-botpad")  # breathing row below the hints
@@ -123,27 +126,33 @@ class StarBotPanel(Vertical):
         return w
 
     def add_user(self, text: str) -> None:
-        acc = token(self, "hint-key")
-        self._add(f"[{acc}]You[/]\n{_esc(text)}")
+        self._add(f"[{self._you_color()}]You[/]\n{_esc(text)}")
 
     def add_tool(self, summary: str) -> None:
         dim = token(self, "rule")
         mut = token(self, "tab-inactive")
         self._add(f"[{dim}]  · [/][{mut}]{_esc(summary)}[/]")
 
+    def _you_color(self) -> str:
+        return token(self, "md-quote")   # a distinct (green-family) name color
+
+    def _bot_color(self) -> str:
+        return token(self, "hint-key")   # the accent — StarBot's brand color
+
     def start_assistant(self) -> None:
-        acc = token(self, "hint-key")
         self._assistant_text = ""
-        self._assistant = self._add(f"[{acc}]StarBot[/]")
+        self._assistant = self._add(f"[{self._bot_color()}]StarBot[/]")
         self.set_thinking(True)
 
     def append_assistant(self, delta: str) -> None:
         if self._assistant is None:
             self.start_assistant()
         self._assistant_text += delta
-        acc = token(self, "hint-key")
         assert self._assistant is not None
-        self._assistant.update(f"[{acc}]StarBot[/]\n{_esc(self._assistant_text)}")
+        # lstrip so a model that opens with blank lines doesn't leave a big gap
+        # under the "StarBot" label.
+        body = _esc(self._assistant_text.lstrip())
+        self._assistant.update(f"[{self._bot_color()}]StarBot[/]\n{body}")
         self.call_after_refresh(lambda: self._log().scroll_end(animate=False))
 
     def finish_assistant(self) -> None:
