@@ -76,6 +76,36 @@ _RE_STRIKE = re.compile(r"~~([^~\n]+)~~")
 # are tracked separately (see MarkStarTextArea._recompute_fences).
 _RE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
+# --- Layout geometry (see _compute_layout / _update_prose_layout) -------------
+# Side inset (left/right margin of the prose column) — wider on roomy windows,
+# tighter on narrow ones, switching at the breakpoint.
+_SIDE_INSET_WIDE = 5
+_SIDE_INSET_NARROW = 2
+_NARROW_BREAKPOINT = 90       # window width at/above which the wide inset applies
+_MIN_PROSE_COLS = 24          # prose never shrinks below this behind the panel
+_MIN_PANEL_COLS = 15          # project panel floor (mirrors config clamp low bound)
+# Footer metrics compaction thresholds (see _refresh_metrics).
+_METRICS_NARROW = 66          # below: drop the least-important metric
+_METRICS_MEDIUM = 92          # below: compact labels
+# Anchored popups (spell suggestions, theme picker).
+_POPUP_WIDTH = 42
+_SUGGEST_MAX_ROWS = 12
+# Terminal control (OSC): set/reset the default background so the sub-cell strip
+# below the last row matches the theme instead of the terminal default.
+_OSC_SET_BG = "\x1b]11;{bg}\x07"
+_OSC_RESET_BG = "\x1b]111\x07"
+# File-naming.
+_DEFAULT_SUFFIX = ".md"
+_COMPILED_SUFFIX = ".compiled.md"
+
+# Tab-chip geometry — the chip renders as: "{lead}{name}{gap}×{tail}", i.e.
+#   _CHIP_LEAD spaces, the filename, _CHIP_GAP (" • " / "   "), the × close hit,
+#   then _CHIP_TAIL (" │"). Both the render string and the click hit-testing use
+# these so the close-× hot-spot can't drift from what's drawn.
+_CHIP_LEAD = 3   # "   " before the name
+_CHIP_GAP = 3    # " {dirty-marker} " between name and ×
+_CHIP_TAIL = 3   # "× │" region width after the name+gap (×, space, │)
+
 
 def _word_bounds(line: str, col: int) -> tuple[int, int]:
     """Expand ``col`` to the word (letters/digits/apostrophes) around it."""
@@ -944,14 +974,17 @@ class MarkStarApp(App[None]):
         """
         panel = 0
         if panel_open:
-            panel = max(15, min(self.prefs.min_panel_width, width - 24))
+            panel = max(
+                _MIN_PANEL_COLS,
+                min(self.prefs.min_panel_width, width - _MIN_PROSE_COLS),
+            )
             panel = max(0, panel)
         # The panel is an OVERLAY (its own layer) — it floats on top of the prose
         # and does NOT reserve width. So the prose column is always centered in the
         # full window; the panel simply covers whatever it covers. On a window too
         # narrow to clear it, the panel overlaps the text, which is acceptable.
         available = max(1, width)
-        base = 5 if width >= 90 else 2
+        base = _SIDE_INSET_WIDE if width >= _NARROW_BREAKPOINT else _SIDE_INSET_NARROW
         if self.prefs.center_text:
             col = min(self.prefs.prose_width, max(1, available - 2 * base))
             side = max(base, (available - col) // 2)
@@ -1127,9 +1160,9 @@ class MarkStarApp(App[None]):
         chars = len(self.document.text)
         words = self.document.word_count()
         width = self.size.width or 0
-        if width < 66:
+        if width < _METRICS_NARROW:
             text = f"{words}w"
-        elif width < 92:
+        elif width < _METRICS_MEDIUM:
             text = f"{chars}c  │  {words}w"
         else:
             text = f"{chars} characters  │  {words} words  │  CommonMark"
@@ -1160,8 +1193,8 @@ class MarkStarApp(App[None]):
             )
             # Plain form: "   " + name + " " + mid + " " + "×" + " " + "│"
             chips.append(f"[{nc}]   {name} {mid} [/][{dim}]×[/] [{dim}]│[/]")
-            width = len(name) + 9
-            close_col = cursor + len(name) + 6
+            width = _CHIP_LEAD + len(name) + _CHIP_GAP + _CHIP_TAIL
+            close_col = cursor + _CHIP_LEAD + len(name) + _CHIP_GAP
             bounds.append((cursor, cursor + width, close_col, i))
             cursor += width
         self._tab_bounds = bounds
@@ -1627,7 +1660,7 @@ class MarkStarApp(App[None]):
             self._refresh_status()
             ok = await self._prompt_and_save_async(
                 title=f"Save All — name for untitled tab {i + 1}",
-                initial=str(Path.cwd() / "untitled.md"),
+                initial=str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
             )
             if ok:
                 saved += 1
@@ -1664,7 +1697,7 @@ class MarkStarApp(App[None]):
             self.run_worker(
                 self._prompt_and_save_async(
                     title="Save — where should this file go?",
-                    initial=str(Path.cwd() / "untitled.md"),
+                    initial=str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
                 )
             )
             return
@@ -1676,7 +1709,7 @@ class MarkStarApp(App[None]):
         initial = (
             str(self.document.path)
             if self.document.path is not None
-            else str(Path.cwd() / "untitled.md")
+            else str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}")
         )
         self.run_worker(
             self._prompt_and_save_async(
@@ -1714,7 +1747,7 @@ class MarkStarApp(App[None]):
         raw = await self.push_screen_wait(
             _PathPrompt(
                 title,
-                initial=initial or str(Path.cwd() / "untitled.md"),
+                initial=initial or str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
                 hint="Enter path · Enter save · Esc cancel · ~ allowed",
             )
         )
@@ -1759,7 +1792,7 @@ class MarkStarApp(App[None]):
             path = Path.cwd() / path
         # Default extension for bare names
         if path.suffix == "":
-            path = path.with_suffix(".md")
+            path = path.with_suffix(_DEFAULT_SUFFIX)
         return path
 
     def action_quit(self) -> None:
@@ -2113,9 +2146,9 @@ class MarkStarApp(App[None]):
             doc.text, base_dir, resolve, self_path=doc.path
         )
         if doc.path is not None:
-            default = str(doc.path.with_name(doc.path.stem + ".compiled.md"))
+            default = str(doc.path.with_name(doc.path.stem + _COMPILED_SUFFIX))
         else:
-            default = str(Path.cwd() / "compiled.md")
+            default = str(Path.cwd() / f"compiled{_DEFAULT_SUFFIX}")
         raw = await self.push_screen_wait(
             _PathPrompt(
                 "Compile — where should the combined Markdown go?",
@@ -2434,11 +2467,11 @@ class MarkStarApp(App[None]):
         self, row, a, b, word, suggestions, off
     ) -> None:
         # Anchor just below the caret; flip above if it would run off the bottom.
-        popup_h = min(len(suggestions) + 2, 12)
+        popup_h = min(len(suggestions) + 2, _SUGGEST_MAX_ROWS)
         y = off.y + 1
         if y + popup_h > self.size.height:
             y = max(0, off.y - popup_h)
-        x = max(0, min(off.x, self.size.width - 42))
+        x = max(0, min(off.x, self.size.width - _POPUP_WIDTH))
         chosen = await self.push_screen_wait(
             SuggestPopup(word, suggestions, (x, y))
         )
@@ -2613,7 +2646,7 @@ class MarkStarApp(App[None]):
         try:
             bg = self.get_theme(self.theme).background
             drv = self._driver
-            drv.write(f"\x1b]11;{bg}\x07")
+            drv.write(_OSC_SET_BG.format(bg=bg))
             drv.flush()
         except Exception:
             pass
@@ -2622,7 +2655,7 @@ class MarkStarApp(App[None]):
         """Restore the terminal's default background on exit (OSC 111)."""
         try:
             drv = self._driver
-            drv.write("\x1b]111\x07")
+            drv.write(_OSC_RESET_BG)
             drv.flush()
         except Exception:
             pass
