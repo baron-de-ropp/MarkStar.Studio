@@ -29,11 +29,15 @@ class ChatHistoryScreen(ModalScreen[str]):
     #hist-hint { color: $text-muted; padding-top: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", "Close", show=False, priority=True)]
+    BINDINGS = [
+        Binding("escape", "cancel", "Close", show=False, priority=True),
+        Binding("d", "delete", "Delete", show=False),
+    ]
 
-    def __init__(self, transcripts) -> None:
+    def __init__(self, transcripts, on_delete=None) -> None:
         super().__init__()
         self._transcripts = transcripts
+        self._on_delete = on_delete
 
     def compose(self) -> ComposeResult:
         dim = token(self, "rule")
@@ -47,7 +51,7 @@ class ChatHistoryScreen(ModalScreen[str]):
                     Option(f"{t.title}   [{dim}]{date} · {turns}[/]", id=t.id)
                 )
             yield OptionList(*options, id="hist-list")
-            yield Label("Enter open · Esc cancel", id="hist-hint")
+            yield Label("Enter open · d delete · Esc cancel", id="hist-hint")
 
     def on_mount(self) -> None:
         self.query_one("#hist-list", OptionList).focus()
@@ -55,6 +59,22 @@ class ChatHistoryScreen(ModalScreen[str]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         self.dismiss(str(event.option.id) if event.option.id else "")
+
+    def action_delete(self) -> None:
+        """Delete the highlighted transcript (file + row)."""
+        ol = self.query_one("#hist-list", OptionList)
+        idx = ol.highlighted
+        if idx is None:
+            return
+        option = ol.get_option_at_index(idx)
+        tid = option.id
+        if not tid:
+            return
+        if self._on_delete is not None:
+            self._on_delete(tid)
+        ol.remove_option(tid)
+        if ol.option_count == 0:
+            self.dismiss("")  # nothing left to pick
 
     def action_cancel(self) -> None:
         self.dismiss("")

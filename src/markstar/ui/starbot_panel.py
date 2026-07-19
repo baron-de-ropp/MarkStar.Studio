@@ -156,8 +156,9 @@ class StarBotPanel(Vertical):
                     )
                 content = (m.get("content") or "").strip()
                 if content:
+                    static = self._add(f"[{self._bot_color()}]StarBot[/]")
+                    self._render_markdown(static, content)
                     self._assistant = None
-                    self.append_assistant(content)
             # system + tool-result messages aren't shown
 
     def add_user(self, text: str) -> None:
@@ -203,8 +204,22 @@ class StarBotPanel(Vertical):
 
     def finish_assistant(self) -> None:
         self.set_thinking(False)
+        if self._assistant is not None and self._assistant_text.strip():
+            self._render_markdown(self._assistant, self._assistant_text)
         self._assistant = None
         self._assistant_text = ""
+
+    def _render_markdown(self, widget: Static, text: str) -> None:
+        """Swap a finished assistant message from plain streamed text to rendered
+        Markdown (bold, lists, headings, code) under the StarBot name."""
+        from rich.console import Group
+        from rich.markdown import Markdown
+        from rich.text import Text as RichText
+
+        name = RichText("StarBot", style=f"bold {self._bot_color()}")
+        body = Markdown(_strip_emoji(text.strip()))
+        widget.update(Group(name, RichText(""), body))
+        self.call_after_refresh(lambda: self._log().scroll_end(animate=False))
 
     # --- animations --------------------------------------------------------
 
@@ -277,9 +292,13 @@ _EMOJI = re.compile(
 )
 
 
+def _strip_emoji(text: str) -> str:
+    return _EMOJI.sub("", text)
+
+
 def _sanitize(text: str) -> str:
     """Drop emoji (they break cell counts) and escape markup brackets."""
-    return _EMOJI.sub("", text).replace("[", "\\[")
+    return _strip_emoji(text).replace("[", "\\[")
 
 
 # Back-compat alias — the transcript helpers call this name.

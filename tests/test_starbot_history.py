@@ -61,3 +61,30 @@ def test_delete_removes_transcript(tmp_path) -> None:
 
 def test_load_missing_returns_none(tmp_path) -> None:
     assert ChatStore(tmp_path).load("nope") is None
+
+
+def test_history_picker_delete_removes_transcript(tmp_path) -> None:
+    import asyncio
+
+    from markstar.app import MarkStarApp
+    from markstar.ui.starbot_history_screen import ChatHistoryScreen
+
+    store = ChatStore(tmp_path)
+    store.save(ChatTranscript("a", "2026-01-01T00:00:00", _msgs("first")))
+    store.save(ChatTranscript("b", "2026-02-01T00:00:00", _msgs("second")))
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            scr = ChatHistoryScreen(store.list(), on_delete=store.delete)
+            await app.push_screen(scr)
+            await pilot.pause()
+            ol = scr.query_one("#hist-list")
+            ol.highlighted = 0  # newest = "b"
+            scr.action_delete()
+            await pilot.pause()
+
+    asyncio.run(go())
+    remaining = [t.id for t in store.list()]
+    assert remaining == ["a"]  # "b" was deleted from disk

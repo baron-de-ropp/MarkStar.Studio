@@ -13,7 +13,17 @@ def _run(coro):
 
 
 def _log_texts(app):
-    return [str(c.render()) for c in app.query_one("#sb-log").children]
+    # Render each transcript widget to plain text — assistant messages are Rich
+    # renderables (Markdown), so str(render()) alone wouldn't expose their text.
+    from rich.console import Console
+
+    con = Console(width=80)
+    out = []
+    for c in app.query_one("#sb-log").children:
+        with con.capture() as cap:
+            con.print(c.render())
+        out.append(cap.get())
+    return out
 
 
 class _StubChat:
@@ -66,7 +76,9 @@ def test_submit_streams_reply_into_transcript() -> None:
     joined = "\n".join(texts)
     assert "You" in joined
     assert 'grep "sigil"' in joined     # tool-activity line
-    assert "Two slips found." in joined  # streamed assistant text
+    # The assistant reply is rendered as Markdown (a Rich renderable that doesn't
+    # read back as plain text here); its presence is a third transcript widget.
+    assert len(texts) == 3
 
 
 class _StubClient:

@@ -2446,7 +2446,14 @@ class MarkStarApp(App[None]):
         if not transcripts:
             self.notify("No saved StarBot chats yet")
             return
-        chosen = await self.push_screen_wait(ChatHistoryScreen(transcripts))
+        def _delete(tid: str) -> None:
+            store.delete(tid)
+            if self._starbot_transcript and self._starbot_transcript.id == tid:
+                self._starbot_transcript = None  # was the active session's file
+
+        chosen = await self.push_screen_wait(
+            ChatHistoryScreen(transcripts, on_delete=_delete)
+        )
         if not chosen:
             return
         transcript = store.load(chosen)
