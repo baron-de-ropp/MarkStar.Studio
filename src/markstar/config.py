@@ -18,6 +18,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from markstar.domain.spellcheck import SPELL_LANGUAGES
 from markstar.ui.themes import DEFAULT_THEME_NAME, THEME_NAMES
 
 MOUSE_CHOICES = ("auto", "on", "off")
@@ -56,6 +57,8 @@ class Preferences:
     prose_width: int = 120  # max writing-measure columns (line wrap cap)
     center_text: bool = True  # center the prose column in the terminal
     spellcheck: bool = True  # underline unknown words
+    spellcheck_ms: int = 600  # debounce before re-checking after edits
+    spell_language: str = "en"  # bundled dictionary (see SPELL_LANGUAGES)
     autosave: bool = True  # debounced crash-safety sidecars
     autosave_ms: int = 1500  # debounce delay
     recent_projects: list = field(default_factory=list)  # last folders (max 5)
@@ -84,6 +87,9 @@ class Preferences:
             prefs.center_text = data["center_text"]
         if isinstance(data.get("spellcheck"), bool):
             prefs.spellcheck = data["spellcheck"]
+        lang = data.get("spell_language")
+        if isinstance(lang, str) and lang in SPELL_LANGUAGES:
+            prefs.spell_language = lang
         if isinstance(data.get("autosave"), bool):
             prefs.autosave = data["autosave"]
         rp = data.get("recent_projects")
@@ -98,6 +104,9 @@ class Preferences:
         prefs.prose_width = _clamp_int(data.get("prose_width"), prefs.prose_width, 40, 400)
         prefs.autosave_ms = _clamp_int(
             data.get("autosave_ms"), prefs.autosave_ms, 100, 60000
+        )
+        prefs.spellcheck_ms = _clamp_int(
+            data.get("spellcheck_ms"), prefs.spellcheck_ms, 100, 10000
         )
         return prefs
 

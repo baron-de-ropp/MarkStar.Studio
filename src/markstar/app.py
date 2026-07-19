@@ -656,7 +656,9 @@ class MarkStarApp(App[None]):
         self._last_find_end = 0
         # (start, end, close_col, index) per tab chip — for click routing.
         self._tab_bounds: list[tuple[int, int, int, int]] = []
-        self._speller = Speller(self.prefs.spell_added)
+        self._speller = Speller(
+            self.prefs.spell_added, language=self.prefs.spell_language
+        )
         self._spellcheck_on = self.prefs.spellcheck
         self._spell_timer = None
         self._spell_current: tuple[int, int, str] | None = None
@@ -2504,7 +2506,8 @@ class MarkStarApp(App[None]):
             return
         if self._spell_timer is not None:
             self._spell_timer.stop()
-        self._spell_timer = self.set_timer(0.6, self._run_spellcheck)
+        delay = max(0.1, self.prefs.spellcheck_ms / 1000)
+        self._spell_timer = self.set_timer(delay, self._run_spellcheck)
 
     def _run_spellcheck(self) -> None:
         if not self._spellcheck_on:

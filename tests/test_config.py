@@ -27,6 +27,8 @@ def test_save_and_reload_round_trip(tmp_path, monkeypatch) -> None:
         soft_wrap=False,
         autosave=False,
         autosave_ms=3000,
+        spellcheck_ms=250,
+        spell_language="fr",
     ).save()
 
     reloaded = Preferences.load()
@@ -34,6 +36,8 @@ def test_save_and_reload_round_trip(tmp_path, monkeypatch) -> None:
     assert reloaded.mouse == "off"
     assert reloaded.formatting is False
     assert reloaded.soft_wrap is False
+    assert reloaded.spellcheck_ms == 250
+    assert reloaded.spell_language == "fr"
     # Regression: autosave + autosave_ms are written by _to_toml but were never
     # parsed back by load(), so toggling autosave off didn't survive a restart.
     assert reloaded.autosave is False

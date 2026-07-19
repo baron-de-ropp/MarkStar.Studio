@@ -59,23 +59,39 @@ def find_misspellings(text: str, known: Callable[[str], bool]) -> list[Match]:
     return matches
 
 
-class Speller:
-    """English speller with a personal dictionary and session ignore-set.
+# pyspellchecker's bundled dictionaries. 'en' is the default; an unknown code
+# falls back to English rather than crashing the editor.
+SPELL_LANGUAGES = ("en", "es", "fr", "de", "pt", "ru", "ar", "eu", "lv", "nl")
 
-    The underlying pyspellchecker dictionary loads lazily on first use (it is a
-    few MB); callers that care about latency should prime it off the UI thread.
+
+class Speller:
+    """Speller with a personal dictionary and session ignore-set.
+
+    ``language`` selects a bundled pyspellchecker dictionary (default English);
+    an unrecognized code falls back to English. The dictionary loads lazily on
+    first use (it is a few MB); callers that care about latency should prime it
+    off the UI thread.
     """
 
-    def __init__(self, added: Iterable[str] = ()) -> None:
+    def __init__(self, added: Iterable[str] = (), language: str = "en") -> None:
         self._sp = None
+        self._language = language if language in SPELL_LANGUAGES else "en"
         self._added: set[str] = {w.lower() for w in added}
         self._ignored: set[str] = set()
+
+    @property
+    def language(self) -> str:
+        return self._language
 
     def _ensure(self) -> None:
         if self._sp is None:
             from spellchecker import SpellChecker
 
-            self._sp = SpellChecker()
+            try:
+                self._sp = SpellChecker(language=self._language)
+            except Exception:
+                self._sp = SpellChecker(language="en")
+                self._language = "en"
 
     def prime(self) -> None:
         """Load the dictionary now (safe to call from a worker thread)."""
