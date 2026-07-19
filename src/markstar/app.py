@@ -32,6 +32,7 @@ from markstar.domain.search import (
     replace_match,
     step_find,
 )
+from markstar.domain.includes import compile_document, make_resolver
 from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
 from markstar.ui.find_bar import FindBar
@@ -57,6 +58,8 @@ _RE_QUOTE = re.compile(r"^(\s*>\s?)(.*)$")
 _RE_LIST = re.compile(r"^(\s*(?:[-+*]|\d+\.)\s+)")
 # [text](url) — dim the brackets/url, color the link text.
 _RE_LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
+# ![[name]] — a MarkStar include token (expanded only on compile).
+_RE_INCLUDE = re.compile(r"!\[\[[^\]\n]+\]\]")
 _RE_CODE = re.compile(r"`([^`\n]+)`")
 _RE_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 _RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)")
@@ -110,6 +113,9 @@ def _markdown_spans(line: str) -> list[tuple[int, int, str]]:
     lst = _RE_LIST.match(line)
     if lst:
         spans.append((0, len(lst.group(1)), "marker"))
+    # Includes: ![[name]] — a whole-token highlight (expanded only on compile).
+    for m in _RE_INCLUDE.finditer(line):
+        spans.append((m.start(), m.end(), "include"))
     # Links: [text](url) — color the text, dim the [] () and the url.
     for m in _RE_LINK.finditer(line):
         text_start = m.start() + 1
@@ -187,6 +193,7 @@ class MarkStarTextArea(TextArea):
             "heading": Style(color=token(self.app, "md-heading"), bold=True),
             "quote": Style(color=token(self.app, "md-quote"), italic=True),
             "link": Style(color=token(self.app, "md-link"), underline=True),
+            "include": Style(color=token(self.app, "md-include"), bold=True),
             "search": Style(bgcolor=token(self.app, "search-match")),
             "spell": Style(
                 color=token(self.app, "spell-underline"), underline=True
@@ -694,6 +701,7 @@ class MarkStarApp(App[None]):
         add("save", "Save", "File", self.cmd_save, "ctrl+s")
         add("save_as", "Save As…", "File", self.cmd_save_as)  # menu only
         add("save_all", "Save All", "File", self.cmd_save_all)  # menu only
+        add("compile", "Compile…", "File", self.cmd_compile)  # expand includes → .md
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
 
         # Edit
@@ -737,6 +745,7 @@ class MarkStarApp(App[None]):
         add("fmt_number", "Numbered List", "Format", self.cmd_numbered_list)
         add("fmt_rule", "Horizontal Rule", "Format", self.cmd_hrule)
         add("fmt_fence", "Code Fence", "Format", self.cmd_code_fence)
+        add("fmt_include", "Include File", "Format", self.cmd_include)
 
         # View
         add(
@@ -1325,8 +1334,29 @@ class MarkStarApp(App[None]):
         root = await self.push_screen_wait(
             WelcomeScreen(self._project_root(), __version__, recent)
         )
-        if root is not None:
+        if root is None:
+            return
+        if root.is_dir():
             self._set_project_root(root)
+        elif root.exists():
+            self.notify(f'"{root.name}" is a file, not a folder', severity="warning")
+        else:
+            ok = await self.push_screen_wait(
+                _ConfirmDialog(
+                    title="Create new project?",
+                    message=f'No folder at "{root}".\n'
+                    "Create it as a new project folder?",
+                    yes_label="create",
+                    no_label="cancel",
+                )
+            )
+            if ok:
+                try:
+                    root.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    self.notify(f"Could not create folder: {exc}", severity="error")
+                    return
+                self._set_project_root(root)
 
     def cmd_open_folder(self) -> None:
         """Prompt for a folder and point the project panel at it (opens it)."""
@@ -1966,6 +1996,62 @@ class MarkStarApp(App[None]):
 
     def cmd_code_fence(self) -> None:
         self._wrap_selection("```\n", "\n```")
+
+    def cmd_include(self) -> None:
+        """Insert an include token ``![[]]`` with the caret between the brackets."""
+        editor = self.query_one("#editor", TextArea)
+        selected = editor.selected_text
+        if selected:
+            start, end = sorted([editor.selection.start, editor.selection.end])
+            editor.replace(f"![[{selected}]]", start, end)
+        else:
+            editor.insert("![[]]")
+            row, col = editor.cursor_location
+            editor.move_cursor((row, max(0, col - 2)))
+        editor.focus()
+
+    def cmd_compile(self) -> None:
+        """Expand ``![[…]]`` includes of the active buffer into one Markdown file."""
+        self.run_worker(self._compile_async())
+
+    async def _compile_async(self) -> None:
+        self._sync_document_from_editor()
+        doc = self.document
+        base_dir = doc.path.parent if doc.path else Path.cwd()
+        resolve = make_resolver(self._project_root())
+        output, errors = compile_document(
+            doc.text, base_dir, resolve, self_path=doc.path
+        )
+        if doc.path is not None:
+            default = str(doc.path.with_name(doc.path.stem + ".compiled.md"))
+        else:
+            default = str(Path.cwd() / "compiled.md")
+        raw = await self.push_screen_wait(
+            _PathPrompt(
+                "Compile — where should the combined Markdown go?",
+                initial=default,
+                hint="Enter save · Esc cancel · ~ allowed",
+            )
+        )
+        if raw is None:
+            return
+        out_path = self._normalize_save_path(raw)
+        if out_path is None:
+            self.notify("Empty path — not compiled", severity="warning")
+            return
+        try:
+            out_path.write_text(output, encoding="utf-8")
+        except OSError as exc:
+            self.notify(f"Compile failed: {exc}", severity="error")
+            return
+        if errors:
+            self.notify(
+                f"Compiled → {out_path.name} · {len(errors)} issue(s): {errors[0]}",
+                severity="warning",
+                timeout=8,
+            )
+        else:
+            self.notify(f"Compiled → {out_path.name}")
 
     def action_bold(self) -> None:
         self.cmd_bold()

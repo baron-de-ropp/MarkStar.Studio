@@ -89,6 +89,47 @@ def test_file_launch_opens_editor_and_panel_at_folder(tmp_path) -> None:
     assert root == tmp_path
 
 
+def test_nonexistent_folder_offers_to_create(tmp_path) -> None:
+    """Typing a non-existent folder → confirm → the folder is created + opened."""
+    new_dir = tmp_path / "BrandNewNovel"
+    assert not new_dir.exists()
+
+    async def go():
+        from unittest.mock import AsyncMock, patch
+
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            # welcome returns the missing path; then the confirm dialog says yes.
+            with patch.object(
+                app, "push_screen_wait", AsyncMock(side_effect=[new_dir, True])
+            ):
+                await app._show_welcome()
+            await pilot.pause()
+            return new_dir.is_dir(), app._project_root()
+
+    created, root = _run(go())
+    assert created is True
+    assert root == new_dir
+
+
+def test_declining_create_leaves_no_folder(tmp_path) -> None:
+    new_dir = tmp_path / "Nope"
+
+    async def go():
+        from unittest.mock import AsyncMock, patch
+
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            with patch.object(
+                app, "push_screen_wait", AsyncMock(side_effect=[new_dir, False])
+            ):
+                await app._show_welcome()
+            await pilot.pause()
+            return new_dir.exists()
+
+    assert _run(go()) is False
+
+
 def test_skipping_welcome_leaves_panel_closed() -> None:
     async def go():
         app = MarkStarApp()

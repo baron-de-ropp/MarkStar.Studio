@@ -197,12 +197,10 @@ class WelcomeScreen(ModalScreen):
             self.dismiss(None)
 
     def _confirm(self, raw: str) -> None:
+        # Return the path as-is; the app validates it exists (and offers to
+        # create it as a new project if it doesn't).
         text = (raw or "").strip().strip('"').strip("'")
         if not text:
             self.dismiss(None)
             return
-        path = Path(text).expanduser()
-        if not path.is_dir():
-            self.notify(f"Not a folder: {path}", severity="warning")
-            return
-        self.dismiss(path)
+        self.dismiss(Path(text).expanduser())
