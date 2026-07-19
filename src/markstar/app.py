@@ -15,6 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
 from textual import events
+from textual.geometry import Size
 from textual.widgets import Static, TextArea
 from textual.widgets.text_area import Selection
 
@@ -133,6 +134,28 @@ class MarkStarTextArea(TextArea):
         # line_index -> "fence" (a ``` delimiter line) | "code" (line inside a fence)
         self._fence_lines: dict[int, str] = {}
         self.prose_width = 0  # 0 = no cap; else max writing-measure columns
+        self.scroll_past_end = True  # extra room below the last line (see below)
+
+    # Fraction of the viewport left empty below the last line at max scroll, so
+    # the final line can rest ~1/3 of the way down (2/3 empty) — "typewriter room".
+    _SCROLL_PAST_END_FRACTION = 2 / 3
+
+    def _refresh_size(self) -> None:
+        """Extend the scrollable area below the document so the last line can be
+        scrolled up to ~1/3 of the screen height (2/3 empty below), instead of
+        sticking to the bottom edge. Only engages once the document actually
+        overflows the viewport, so short files don't gain a phantom scrollbar."""
+        super()._refresh_size()
+        if not getattr(self, "scroll_past_end", False):
+            return
+        view = self.size.height
+        # Base the extra on the true content height (wrapped_document.height), NOT
+        # the post-super virtual_size — reading the latter back can compound the
+        # padding across the re-layouts that enlarging virtual_size triggers.
+        content_h = self.wrapped_document.height
+        if view > 0 and content_h > view:
+            extra = int(view * self._SCROLL_PAST_END_FRACTION)
+            self.virtual_size = Size(self.virtual_size.width, content_h + extra)
 
     @property
     def wrap_width(self) -> int:
