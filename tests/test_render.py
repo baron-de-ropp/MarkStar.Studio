@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from markstar.app import MarkStarApp, MarkStarTextArea, _markdown_spans
+from markstar.app import MarkStarApp, MarkStarTextArea
+from markstar.domain.markdown import markdown_spans
 from markstar.ui.themes import token
 
 
@@ -13,7 +14,7 @@ def _run(coro):
 
 
 def test_markdown_spans_bold_marks_and_content() -> None:
-    spans = _markdown_spans("a **bold** c")
+    spans = markdown_spans("a **bold** c")
     # marker(2,4) strong(4,8) marker(8,10)
     assert (2, 4, "marker") in spans
     assert (4, 8, "strong") in spans
@@ -21,14 +22,14 @@ def test_markdown_spans_bold_marks_and_content() -> None:
 
 
 def test_markdown_spans_heading() -> None:
-    spans = _markdown_spans("## Title")
+    spans = markdown_spans("## Title")
     assert spans[0] == (0, 3, "marker")
     assert spans[1] == (3, len("## Title"), "heading")
 
 
 def test_italic_not_matched_inside_bold() -> None:
     # The ** markers must not be picked up as italic single-*.
-    spans = _markdown_spans("**x**")
+    spans = markdown_spans("**x**")
     assert not any(kind == "emphasis" for _, _, kind in spans)
 
 
@@ -61,7 +62,7 @@ def test_toggle_formatting_off_removes_styling() -> None:
 
 
 def test_blockquote_spans() -> None:
-    spans = _markdown_spans("> quoted")
+    spans = markdown_spans("> quoted")
     assert spans[0] == (0, 2, "marker")
     assert spans[1] == (2, len("> quoted"), "quote")
 
@@ -83,19 +84,19 @@ def test_fenced_code_block_line_map() -> None:
 
 
 def test_bullet_and_numbered_list_markers() -> None:
-    assert (0, 2, "marker") in _markdown_spans("- item")
-    assert (0, 2, "marker") in _markdown_spans("+ item")
-    assert (0, 3, "marker") in _markdown_spans("1. item")
+    assert (0, 2, "marker") in markdown_spans("- item")
+    assert (0, 2, "marker") in markdown_spans("+ item")
+    assert (0, 3, "marker") in markdown_spans("1. item")
 
 
 def test_star_bullet_is_list_not_italic() -> None:
-    spans = _markdown_spans("* a bullet")
+    spans = markdown_spans("* a bullet")
     assert (0, 2, "marker") in spans
     assert not any(kind == "emphasis" for _, _, kind in spans)
 
 
 def test_link_spans() -> None:
-    spans = _markdown_spans("[text](https://x.com)")
+    spans = markdown_spans("[text](https://x.com)")
     assert any(kind == "link" for _, _, kind in spans)
     assert sum(1 for _, _, kind in spans if kind == "marker") >= 2
 

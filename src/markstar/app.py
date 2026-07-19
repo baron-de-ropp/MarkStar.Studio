@@ -39,6 +39,17 @@ from markstar.domain.autosave import (
     write_sidecar,
 )
 from markstar.domain.includes import compile_document, make_resolver
+from markstar.domain.markdown import (
+    RE_BOLD,
+    RE_CODE,
+    RE_FENCE,
+    RE_ITALIC,
+    RE_LINK,
+    RE_STRIKE,
+    markdown_spans,
+    toggle_emphasis,
+    word_bounds,
+)
 from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
 from markstar.ui.find_bar import FindBar
@@ -56,25 +67,9 @@ from markstar.ui.themes import (
     token,
 )
 
-# Inline Markdown patterns (approach #1: style spans, never hide characters, so
-# there is no source↔screen offset mapping — see docs/MARKSTAR_KEYMAP.md §5b).
-_RE_HEADING = re.compile(r"^(#{1,6}\s+)(.*)$")
-_RE_QUOTE = re.compile(r"^(\s*>\s?)(.*)$")
-# List marker at line start: -, +, * (bullet) or "1." (ordered), then a space.
-# The trailing space distinguishes "* item" (bullet) from "*italic*".
-_RE_LIST = re.compile(r"^(\s*(?:[-+*]|\d+\.)\s+)")
-# [text](url) — dim the brackets/url, color the link text.
-_RE_LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
-# ![[name]] — a MarkStar include token (expanded only on compile).
-_RE_INCLUDE = re.compile(r"!\[\[[^\]\n]+\]\]")
-_RE_CODE = re.compile(r"`([^`\n]+)`")
-_RE_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
-_RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)")
-_RE_STRIKE = re.compile(r"~~([^~\n]+)~~")
-# A fenced-code delimiter line: ``` or ~~~ (3+), optionally indented, with an
-# optional info string (language) after it. Fences span multiple lines, so they
-# are tracked separately (see MarkStarTextArea._recompute_fences).
-_RE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+# Inline Markdown parsing/editing lives in domain/markdown.py (pure, testable).
+# See docs/MARKSTAR_KEYMAP.md §5b for the "style spans, never hide characters"
+# approach that keeps document columns 1:1 with screen columns.
 
 # --- Layout geometry (see _compute_layout / _update_prose_layout) -------------
 # Side inset (left/right margin of the prose column) — wider on roomy windows,
@@ -105,72 +100,6 @@ _COMPILED_SUFFIX = ".compiled.md"
 _CHIP_LEAD = 3   # "   " before the name
 _CHIP_GAP = 3    # " {dirty-marker} " between name and ×
 _CHIP_TAIL = 3   # "× │" region width after the name+gap (×, space, │)
-
-
-def _word_bounds(line: str, col: int) -> tuple[int, int]:
-    """Expand ``col`` to the word (letters/digits/apostrophes) around it."""
-    n = len(line)
-    col = max(0, min(col, n))
-
-    def is_word(ch: str) -> bool:
-        return ch.isalnum() or ch == "'"
-
-    start = col
-    while start > 0 and is_word(line[start - 1]):
-        start -= 1
-    end = col
-    while end < n and is_word(line[end]):
-        end += 1
-    return start, end
-
-
-def _markdown_spans(line: str) -> list[tuple[int, int, str]]:
-    """Return (start, end, style-key) spans for inline Markdown on one line.
-
-    Markers (``**``, ``*``, `` ` ``, ``~~``, ``#``, ``>``) get the ``marker``
-    key so they render dimmed; the wrapped content gets its semantic key.
-    Characters are never removed, so columns map 1:1 to the document.
-    (Fenced code blocks are handled per-line in get_line, not here.)
-    """
-    spans: list[tuple[int, int, str]] = []
-    heading = _RE_HEADING.match(line)
-    if heading:
-        marker_end = len(heading.group(1))
-        spans.append((0, marker_end, "marker"))
-        spans.append((marker_end, len(line), "heading"))
-        return spans
-    quote = _RE_QUOTE.match(line)
-    if quote:
-        marker_end = len(quote.group(1))
-        spans.append((0, marker_end, "marker"))
-        spans.append((marker_end, len(line), "quote"))
-        return spans
-    # List marker (bullet/ordered): dim just the marker, then keep going so
-    # inline formatting inside the item still renders.
-    lst = _RE_LIST.match(line)
-    if lst:
-        spans.append((0, len(lst.group(1)), "marker"))
-    # Includes: ![[name]] — a whole-token highlight (expanded only on compile).
-    for m in _RE_INCLUDE.finditer(line):
-        spans.append((m.start(), m.end(), "include"))
-    # Links: [text](url) — color the text, dim the [] () and the url.
-    for m in _RE_LINK.finditer(line):
-        text_start = m.start() + 1
-        text_end = text_start + len(m.group(1))
-        spans.append((m.start(), text_start, "marker"))  # [
-        spans.append((text_start, text_end, "link"))     # text
-        spans.append((text_end, m.end(), "marker"))      # ](url)
-    for rx, mlen, kind in (
-        (_RE_CODE, 1, "code"),
-        (_RE_BOLD, 2, "strong"),
-        (_RE_ITALIC, 1, "emphasis"),
-        (_RE_STRIKE, 2, "strike"),
-    ):
-        for m in rx.finditer(line):
-            spans.append((m.start(), m.start() + mlen, "marker"))
-            spans.append((m.start() + mlen, m.end() - mlen, kind))
-            spans.append((m.end() - mlen, m.end(), "marker"))
-    return spans
 
 
 class MarkStarTextArea(TextArea):
@@ -248,7 +177,7 @@ class MarkStarTextArea(TextArea):
         fences: dict[int, str] = {}
         in_fence = False
         for i, line in enumerate(self.text.split("\n")):
-            if _RE_FENCE.match(line):
+            if RE_FENCE.match(line):
                 fences[i] = "fence"
                 in_fence = not in_fence
             elif in_fence:
@@ -289,7 +218,7 @@ class MarkStarTextArea(TextArea):
             line = self.document.get_line(row)
         except Exception:
             return False
-        return any(m.start() <= col < m.end() for m in _RE_LINK.finditer(line))
+        return any(m.start() <= col < m.end() for m in RE_LINK.finditer(line))
 
     def on_click(self, event: events.Click) -> None:
         """Single click = place caret (TextArea default); double = select word;
@@ -302,7 +231,7 @@ class MarkStarTextArea(TextArea):
             return
         if event.chain == 2:
             line = self.document.get_line(row)
-            a, b = _word_bounds(line, col)
+            a, b = word_bounds(line, col)
             if a != b:
                 self.selection = Selection((row, a), (row, b))
                 event.stop()
@@ -399,7 +328,7 @@ class MarkStarTextArea(TextArea):
                 styles = self._theme_styles()
                 line.stylize(styles["code"], 0, len(text))
             else:
-                md_spans = _markdown_spans(text)
+                md_spans = markdown_spans(text)
                 if md_spans:
                     styles = self._theme_styles()
                     length = len(text)
@@ -2036,7 +1965,8 @@ class MarkStarApp(App[None]):
 
     def _toggle_emphasis(self, marker: str, regex: "re.Pattern") -> None:
         """Toggle ``marker`` (**, *, ~~, `) on the selection or the word under
-        the caret — wrap if plain, strip the markers if already emphasized."""
+        the caret. Thin adapter: reads the editor state, delegates the text/caret
+        math to the pure ``markdown.toggle_emphasis``, applies the result."""
         editor = self.query_one("#editor", TextArea)
         (sr, sc), (er, ec) = editor.selection.start, editor.selection.end
         if sr != er:  # multi-line selection → plain wrap (no toggle)
@@ -2044,53 +1974,24 @@ class MarkStarApp(App[None]):
             return
         row = sr
         line = editor.document.get_line(row)
-        mlen = len(marker)
         caret = editor.cursor_location[1]
-        if sc != ec:
-            a, b = sorted((sc, ec))
-        else:
-            a, b = _word_bounds(line, caret)
-
-        enclosing = None
-        for m in regex.finditer(line):
-            if m.start() <= a and b <= m.end():
-                enclosing = m
-                break
-
-        if enclosing is not None:  # already emphasized → strip markers
-            s, e = enclosing.start(), enclosing.end()
-            new_line = line[:s] + line[s + mlen : e - mlen] + line[e:]
-            if caret <= s:
-                nc = caret
-            elif caret <= s + mlen:
-                nc = s
-            elif caret <= e - mlen:
-                nc = caret - mlen
-            else:
-                nc = caret - 2 * mlen
-        else:  # wrap the range (or insert empty markers at a bare caret)
-            new_line = line[:a] + marker + line[a:b] + marker + line[b:]
-            if caret <= a:
-                nc = caret
-            elif caret <= b:
-                nc = caret + mlen
-            else:
-                nc = caret + 2 * mlen
+        a, b = sorted((sc, ec)) if sc != ec else word_bounds(line, caret)
+        new_line, nc = toggle_emphasis(line, marker, regex, a, b, caret)
         editor.replace(new_line, (row, 0), (row, len(line)))
-        editor.move_cursor((row, max(0, min(nc, len(new_line)))))
+        editor.move_cursor((row, nc))
         editor.focus()
 
     def cmd_bold(self) -> None:
-        self._toggle_emphasis("**", _RE_BOLD)
+        self._toggle_emphasis("**", RE_BOLD)
 
     def cmd_italic(self) -> None:
-        self._toggle_emphasis("*", _RE_ITALIC)
+        self._toggle_emphasis("*", RE_ITALIC)
 
     def cmd_strikethrough(self) -> None:
-        self._toggle_emphasis("~~", _RE_STRIKE)
+        self._toggle_emphasis("~~", RE_STRIKE)
 
     def cmd_inline_code(self) -> None:
-        self._toggle_emphasis("`", _RE_CODE)
+        self._toggle_emphasis("`", RE_CODE)
 
     def cmd_link(self) -> None:
         editor = self.query_one("#editor", TextArea)
@@ -2450,7 +2351,7 @@ class MarkStarApp(App[None]):
         editor = self.query_one("#editor", MarkStarTextArea)
         row, col = editor.cursor_location
         line = editor.document.get_line(row)
-        a, b = _word_bounds(line, col)
+        a, b = word_bounds(line, col)
         if a == b:
             self.notify("Put the caret on a word first")
             return

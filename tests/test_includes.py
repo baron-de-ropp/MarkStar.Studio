@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from markstar.app import MarkStarApp, MarkStarTextArea, _markdown_spans
+from markstar.app import MarkStarApp, MarkStarTextArea
+from markstar.domain.markdown import markdown_spans
 from markstar.domain.includes import compile_document, make_resolver
 
 
@@ -61,7 +62,7 @@ def test_resolver_prefers_file_dir_then_project_root(tmp_path) -> None:
 
 def test_include_token_rendered_in_editor(tmp_path) -> None:
     # Pure span detection
-    spans = _markdown_spans("see ![[chapter-01]] here")
+    spans = markdown_spans("see ![[chapter-01]] here")
     assert any(kind == "include" for _, _, kind in spans)
 
     async def go():
