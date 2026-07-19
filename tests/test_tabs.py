@@ -77,30 +77,33 @@ def test_prose_width_pref_applied_to_editor(tmp_path, monkeypatch) -> None:
     assert _run(go()) == 80
 
 
-def test_layout_keeps_prose_clear_of_the_panel() -> None:
-    """Editor + tabs must start at/after the panel's right edge at every size."""
+def test_prose_centered_in_full_width_panel_overlays() -> None:
+    """The panel is an overlay — it must NOT reserve width. The prose column is
+    centered in the full window whether the panel is open or closed (so opening
+    the panel never shifts the prose off-center); the panel just floats on top."""
 
     async def go():
         app = MarkStarApp()
         async with app.run_test() as pilot:
             await pilot.pause()
             results = []
-            for width, panel_open in [
-                (160, True), (120, True), (76, True), (50, True), (40, True),
-                (100, False),
-            ]:
-                panel, left_pad, col, right_pad = app._compute_layout(width, panel_open)
-                available = width - panel
-                results.append((width, panel_open, panel, left_pad, col, right_pad, available))
+            for width in [160, 120, 100, 76, 50, 40]:
+                closed = app._compute_layout(width, False)
+                opened = app._compute_layout(width, True)
+                results.append((width, closed, opened))
             return results
 
-    for width, panel_open, panel, left_pad, col, right_pad, available in _run(go()):
-        assert left_pad >= panel, f"{width}: editor hidden under panel"
-        assert col >= 1
-        assert left_pad + col + right_pad == width, f"{width}: columns don't sum"
-        assert col <= available, f"{width}: prose wider than available space"
-        if panel_open:
-            assert panel <= width - 24, f"{width}: panel eats the screen"
+    for width, closed, opened in _run(go()):
+        panel_c, left_c, col_c, right_c = closed
+        panel_o, left_o, col_o, right_o = opened
+        # Columns always tile the full width.
+        assert left_c + col_c + right_c == width
+        assert left_o + col_o + right_o == width
+        # Opening the panel does not move the prose: same padding + column.
+        assert (left_o, col_o, right_o) == (left_c, col_c, right_c), (
+            f"{width}: panel shifted the prose instead of overlaying"
+        )
+        assert panel_c == 0 and panel_o > 0
 
 
 def test_centering_narrows_and_toggle_off_widens() -> None:

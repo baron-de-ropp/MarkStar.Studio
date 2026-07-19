@@ -942,7 +942,11 @@ class MarkStarApp(App[None]):
         if panel_open:
             panel = max(15, min(self.prefs.min_panel_width, width - 24))
             panel = max(0, panel)
-        available = max(1, width - panel)
+        # The panel is an OVERLAY (its own layer) — it floats on top of the prose
+        # and does NOT reserve width. So the prose column is always centered in the
+        # full window; the panel simply covers whatever it covers. On a window too
+        # narrow to clear it, the panel overlaps the text, which is acceptable.
+        available = max(1, width)
         base = 5 if width >= 90 else 2
         if self.prefs.center_text:
             col = min(self.prefs.prose_width, max(1, available - 2 * base))
@@ -950,7 +954,7 @@ class MarkStarApp(App[None]):
         else:
             side = base
             col = max(1, available - 2 * base)
-        left_pad = panel + side
+        left_pad = side
         right_pad = max(0, width - left_pad - col)
         return panel, left_pad, col, right_pad
 
