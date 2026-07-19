@@ -53,6 +53,7 @@ from markstar.domain.markdown import (
 from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
+from markstar.ui.editor_session import EditorSession
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
@@ -603,7 +604,11 @@ class MarkStarApp(App[None]):
         self.theme = self.prefs.theme  # validated to a known theme on load
         self._path_arg = path
         self.workspace = Workspace()
-        self._syncing = False
+        # Owns the Document <-> editor text invariant (see EditorSession). Fetches
+        # the editor lazily since it isn't mounted until compose runs.
+        self._session = EditorSession(
+            self.workspace, lambda: self.query_one("#editor", TextArea)
+        )
         self.registry = CommandRegistry()
         self._last_find_end = 0
         # (start, end, close_col, index) per tab chip — for click routing.
@@ -619,7 +624,9 @@ class MarkStarApp(App[None]):
 
     @property
     def document(self) -> Document:
-        return self.workspace.active
+        # Auto-flushes the editor's live text into the active Document, so every
+        # command reads fresh text without a manual pre-sync. See EditorSession.
+        return self._session.document
 
     def _project_root(self) -> Path:
         """Root folder for the project panel: the opened file's dir, or cwd."""
@@ -1021,12 +1028,11 @@ class MarkStarApp(App[None]):
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
-        if self._syncing:
+        # flush() pulls the edit into the active Document (and reports whether it
+        # actually changed). Don't read self.document above this — it would flush
+        # first and make the "did anything change?" check always false.
+        if not self._session.flush():
             return
-        new_text = event.text_area.text
-        if new_text == self.document.text:
-            return
-        self.document.set_text(new_text)
         self._refresh_status()
         # Fenced code blocks are multi-line — recompute which lines are in a fence.
         if isinstance(event.text_area, MarkStarTextArea):
@@ -1045,19 +1051,14 @@ class MarkStarApp(App[None]):
         self._refresh_metrics()
 
     def _sync_document_from_editor(self) -> None:
-        editor = self.query_one("#editor", TextArea)
-        if editor.text != self.document.text:
-            self.document.set_text(editor.text)
+        self._session.flush()
 
     def _push_document_to_editor(self) -> None:
         self._load_active_into_editor()
         self._refresh_metrics()
 
     def _load_active_into_editor(self) -> None:
-        editor = self.query_one("#editor", TextArea)
-        self._syncing = True
-        editor.load_text(self.document.text)
-        self._syncing = False
+        self._session.load_active()
 
     def _switch_tab(self, switcher) -> None:
         """Sync editor → doc, switch tab via callable, load new doc."""
