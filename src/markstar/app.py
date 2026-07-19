@@ -37,6 +37,7 @@ from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree
+from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
     DEFAULT_THEME_NAME,
     MARKSTAR_LIGHT,
@@ -649,6 +650,7 @@ class MarkStarApp(App[None]):
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
         add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
 
+        add("welcome", "Welcome…", "Help", self.cmd_welcome)
         add("about", "About…", "Help", self.cmd_about)
         add(
             "keyboard_shortcuts",
@@ -741,6 +743,11 @@ class MarkStarApp(App[None]):
         editor.focus()
         self._refresh_status()
         self._update_prose_layout()
+
+        # Fresh launch (no file/folder) → greet with the welcome screen.
+        # Skip under headless test runs (no interactive screen to drive).
+        if self._path_arg is None and not self.is_headless:
+            self.call_after_refresh(lambda: self.run_worker(self._show_welcome()))
 
     def on_resize(self, event) -> None:
         self._update_prose_layout()
@@ -1144,6 +1151,26 @@ class MarkStarApp(App[None]):
 
     def action_toggle_project(self) -> None:
         self.cmd_toggle_project_panel()
+
+    def cmd_welcome(self) -> None:
+        """Re-open the welcome screen (Help > Welcome)."""
+        self.run_worker(self._show_welcome())
+
+    async def _show_welcome(self) -> None:
+        root = await self.push_screen_wait(
+            WelcomeScreen(self._project_root(), __version__)
+        )
+        if root is None:
+            return
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+        except Exception:
+            return
+        self._path_arg = root  # so _project_root() reflects the choice
+        panel.set_root(root)
+        panel.open()
+        panel.focus_tree()
+        self.notify(f"Project: {root.name or root}")
 
     def cmd_open_folder(self) -> None:
         """Prompt for a folder and point the project panel at it (opens it)."""
