@@ -172,6 +172,22 @@ class WelcomeScreen(ModalScreen):
             )
         except Exception:
             pass
+        try:
+            brand = self.query_one("#welcome-brand", Static)
+            year = datetime.now().year
+            if compact:
+                # Two clean centered lines — no bullet to strand mid-wrap.
+                brand.update(
+                    f"© {year} Ryan Lewis Baron de Ropp\n"
+                    f"markstar.studio  ·  v{self._version}"
+                )
+            else:
+                brand.update(
+                    f"© {year} Ryan Lewis Baron de Ropp    ·    "
+                    f"markstar.studio    ·    v{self._version}"
+                )
+        except Exception:
+            pass
 
     def on_resize(self, event: events.Resize) -> None:
         self._refresh_logo()
@@ -193,18 +209,18 @@ class WelcomeScreen(ModalScreen):
                 ]
                 yield OptionList(*options, id="recent-list")
             hk = token(self.app, "hint-key")
-            yield Static(
-                f"[{hk}]Enter[/] open folder    "
-                f"[{hk}]Ctrl+N[/] new file    "
-                f"[{hk}]Esc[/] skip",
-                id="welcome-hints",
-            )
-        year = datetime.now().year
-        yield Static(
-            f"© {year} Ryan Lewis Baron de Ropp    ·    "
-            f"markstar.studio    ·    v{self._version}",
-            id="welcome-brand",
-        )
+            # Each key+label is one unbreakable unit (nbsp within); groups are
+            # separated by ordinary spaces so wrapping only happens *between*
+            # hints, never splitting a key from its label ("Esc" | "skip").
+            nb = " "
+            hints = [
+                (f"[{hk}]Enter[/]", "open folder"),
+                (f"[{hk}]Ctrl+N[/]", "new file"),
+                (f"[{hk}]Esc[/]", "skip"),
+            ]
+            groups = [f"{key}{nb}{label.replace(' ', nb)}" for key, label in hints]
+            yield Static("   ".join(groups), id="welcome-hints")
+        yield Static("", id="welcome-brand")
 
     def on_mount(self) -> None:
         self._refresh_logo()
