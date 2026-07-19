@@ -17,6 +17,7 @@ SIDE_INSET_NARROW = 2
 NARROW_BREAKPOINT = 90       # window width at/above which the wide inset applies
 MIN_PROSE_COLS = 24          # prose never shrinks below this behind the panel
 MIN_PANEL_COLS = 15          # project-panel floor (mirrors the config clamp low bound)
+PANEL_GAP = 5                # gap kept between the panel's right edge and the prose
 
 
 class ProseLayout(NamedTuple):
@@ -38,14 +39,11 @@ def compute_layout(
 
     The panel is an OVERLAY (its own layer): it floats on top of the prose and
     does NOT reserve width, so the prose column is always centered in the full
-    window. On a window too narrow to clear it, the panel simply overlaps the
-    text, which is acceptable. ``panel`` is clamped so the prose keeps at least
-    ``MIN_PROSE_COLS`` columns when the panel is open.
+    window. Its width fills the left margin — up to ``PANEL_GAP`` columns before
+    the prose begins — but never narrower than ``min_panel_width``. On a window
+    too narrow to fit both, it falls back to that minimum and overlaps the prose,
+    which is acceptable.
     """
-    panel = 0
-    if panel_open:
-        panel = max(MIN_PANEL_COLS, min(min_panel_width, width - MIN_PROSE_COLS))
-        panel = max(0, panel)
     available = max(1, width)
     base = SIDE_INSET_WIDE if width >= NARROW_BREAKPOINT else SIDE_INSET_NARROW
     if center_text:
@@ -56,4 +54,11 @@ def compute_layout(
         col = max(1, available - 2 * base)
     left_pad = side
     right_pad = max(0, width - left_pad - col)
+
+    panel = 0
+    if panel_open:
+        # Expand to fill the left margin, stopping PANEL_GAP columns short of the
+        # prose; floor at the configured minimum (overlaps only when too narrow).
+        panel = max(min_panel_width, left_pad - PANEL_GAP)
+        panel = max(0, min(panel, width))
     return ProseLayout(panel, left_pad, col, right_pad)

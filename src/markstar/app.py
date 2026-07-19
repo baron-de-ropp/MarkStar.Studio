@@ -55,7 +55,10 @@ from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.editor_session import EditorSession
 from markstar.ui.layout import ProseLayout, compute_layout
+from markstar.ui.scrollbar import install as _install_thin_scrollbars
 from markstar.ui.tab_bar import TabBar, TabInfo
+
+_install_thin_scrollbars()  # slimmer scrollbar glyph, process-wide
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar

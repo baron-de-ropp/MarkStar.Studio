@@ -142,10 +142,18 @@ class ProjectPanel(Vertical):
     ProjectPanel WriterTree > .directory-tree--file {
         color: $text-muted;
     }
+    /* Keep the indentation guides faint in every state. Textual's Tree brightens
+       the SELECTED node's guides when the tree is blurred (and applies a
+       text-style we must also clear), which lit them up bright white after focus
+       left the panel. Cover both the focused and blurred variants. */
     ProjectPanel WriterTree > .tree--guides,
     ProjectPanel WriterTree > .tree--guides-hover,
-    ProjectPanel WriterTree > .tree--guides-selected {
+    ProjectPanel WriterTree > .tree--guides-selected,
+    ProjectPanel WriterTree:focus > .tree--guides,
+    ProjectPanel WriterTree:focus > .tree--guides-hover,
+    ProjectPanel WriterTree:focus > .tree--guides-selected {
         color: $text-muted 18%;
+        text-style: none;
     }
     ProjectPanel WriterTree > .tree--cursor {
         background: $accent 40%;

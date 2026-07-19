@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-from markstar.ui.layout import (
-    MIN_PANEL_COLS,
-    MIN_PROSE_COLS,
-    ProseLayout,
-    compute_layout,
-)
+from markstar.ui.layout import ProseLayout, compute_layout
 
 
 def _layout(width, panel_open, *, center=True, prose=120, min_panel=40):
@@ -50,17 +45,22 @@ def test_uncentered_fills_available_minus_insets() -> None:
     assert lay.col == 200 - 2 * lay.left_pad
 
 
-def test_panel_clamped_to_preserve_prose_when_there_is_room() -> None:
-    # Roomy enough: the panel is trimmed so prose keeps >= MIN_PROSE_COLS.
+def test_panel_fills_left_margin_on_wide_window() -> None:
+    # 300 wide, prose capped at 120 and centered → left_pad 90; the panel expands
+    # to fill the margin, stopping PANEL_GAP (5) columns short of the prose.
+    lay = _layout(300, panel_open=True, min_panel=40)
+    assert lay.panel == lay.left_pad - 5
+
+
+def test_panel_floors_at_min_when_margin_is_small() -> None:
+    # 50 wide: the left margin is tiny, so the panel falls back to its minimum.
     lay = _layout(50, panel_open=True, min_panel=40)
-    assert lay.panel <= 50 - MIN_PROSE_COLS
+    assert lay.panel == 40
 
 
-def test_panel_floor_wins_on_extremely_narrow_windows() -> None:
-    # Too narrow to honor both: the MIN_PANEL_COLS floor takes over and the
-    # panel simply overlaps the prose (accepted overlay behavior).
+def test_panel_never_exceeds_window_width() -> None:
     lay = _layout(30, panel_open=True, min_panel=40)
-    assert lay.panel == MIN_PANEL_COLS
+    assert lay.panel == 30  # capped at the terminal width (overlaps the prose)
 
 
 def test_returns_named_tuple() -> None:
