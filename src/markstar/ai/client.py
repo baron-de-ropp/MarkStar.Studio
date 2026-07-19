@@ -10,7 +10,7 @@ never depends on it unless a real connection is actually made.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, AsyncIterator, Optional, Protocol
 
 
 @dataclass
@@ -27,14 +27,20 @@ class CompletionResult:
 
 
 class StarBotClient(Protocol):
-    """Minimal surface: one non-streaming completion. (Streaming + the agentic
-    loop arrive in Phase 2; the validator only needs this.)"""
-
     async def complete(
         self,
         messages: list[dict[str, Any]],
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> CompletionResult: ...
+
+    def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]] = None,
+    ) -> AsyncIterator[tuple[str, Any]]:
+        """Yield ("text", delta) events as they arrive, then a final
+        ("tool_calls", list[ToolCall]) if the model requested any."""
+        ...
 
 
 class OpenAIClient:
@@ -72,3 +78,36 @@ class OpenAIClient:
                 )
             )
         return CompletionResult(text=msg.content or "", tool_calls=calls)
+
+    async def stream(self, messages, tools=None):
+        stream = await self._client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            tools=tools or None,
+            stream=True,
+        )
+        # Tool-call fragments arrive split across chunks, keyed by index.
+        acc: dict[int, dict[str, str]] = {}
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if getattr(delta, "content", None):
+                yield ("text", delta.content)
+            for tc in getattr(delta, "tool_calls", None) or []:
+                entry = acc.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if getattr(tc, "id", None):
+                    entry["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn and getattr(fn, "name", None):
+                    entry["name"] = fn.name
+                if fn and getattr(fn, "arguments", None):
+                    entry["arguments"] += fn.arguments
+        if acc:
+            calls = [
+                ToolCall(e["id"], e["name"], e["arguments"])
+                for e in acc.values()
+                if e["name"]
+            ]
+            if calls:
+                yield ("tool_calls", calls)

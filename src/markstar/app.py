@@ -46,7 +46,8 @@ from markstar.domain.spellcheck import Speller
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.editor_session import EditorSession
-from markstar.ui.layout import ProseLayout, compute_layout
+from markstar.ui.layout import PANEL_GAP, ProseLayout, compute_layout
+from markstar.ui.starbot_panel import StarBotPanel
 from markstar.ui.scrollbar import install as _install_thin_scrollbars
 from markstar.ui.tab_bar import TabBar, TabInfo
 
@@ -607,6 +608,7 @@ class MarkStarApp(App[None]):
             screen_size=lambda: self.size,
         )
         self._autosave_timer = None
+        self._starbot_chat = None  # ai.chat.StarBotChat, built lazily on first use
         self._build_commands()
 
     # Compat accessors so callers/tests keep reaching the speller + walk state.
@@ -759,6 +761,7 @@ class MarkStarApp(App[None]):
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("theme_picker", "Theme…", "View", self.cmd_theme_picker)
 
+        add("toggle_starbot", "StarBot Chat", "Project", self.cmd_toggle_starbot, "ctrl+k")
         add("starbot_config", "StarBot…", "Project", self.cmd_starbot_config)
 
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
@@ -788,6 +791,7 @@ class MarkStarApp(App[None]):
                 yield Static("", id="editor-left-pad")
                 yield MarkStarTextArea(id="editor")
                 yield Static("", id="editor-right-pad")
+                yield StarBotPanel(id="starbot-panel")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
                     yield Static("", id="status-rule")
@@ -955,6 +959,16 @@ class MarkStarApp(App[None]):
         if panel:
             try:
                 self.query_one("#project-panel", ProjectPanel).styles.width = panel
+            except Exception:
+                pass
+        # StarBot mirrors the project panel's width (fills its margin the same way),
+        # independent of whether the project panel itself is open.
+        if self._starbot_open():
+            sb_w = max(self.prefs.min_panel_width, left_pad - PANEL_GAP)
+            try:
+                self.query_one("#starbot-panel", StarBotPanel).styles.width = min(
+                    sb_w, width
+                )
             except Exception:
                 pass
         try:
@@ -2253,6 +2267,74 @@ class MarkStarApp(App[None]):
     def cmd_starbot_config(self) -> None:
         """Project → StarBot… — configure the AI assistant connection."""
         self.push_screen(StarBotConfigScreen())
+
+    def cmd_toggle_starbot(self) -> None:
+        """Ctrl+K — open/close the StarBot chat panel (right side)."""
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        if panel.is_open:
+            panel.close()
+            self.query_one("#editor", TextArea).focus()
+        else:
+            panel.open()
+            panel.focus_input()
+        self._update_prose_layout()
+
+    def _starbot_open(self) -> bool:
+        try:
+            return self.query_one("#starbot-panel", StarBotPanel).is_open
+        except Exception:
+            return False
+
+    @on(StarBotPanel.Submitted)
+    def _on_starbot_submit(self, event: StarBotPanel.Submitted) -> None:
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        chat = self._ensure_starbot_chat(panel)
+        if chat is None:
+            return
+        panel.add_user(event.text)
+        self.run_worker(self._starbot_turn(chat, panel, event.text))
+
+    def _ensure_starbot_chat(self, panel: StarBotPanel):
+        """Build the chat (client + project tools) on first use; guide the user to
+        configure a connection if there isn't one."""
+        if self._starbot_chat is not None:
+            return self._starbot_chat
+        from markstar.ai.chat import StarBotChat
+        from markstar.ai.client import OpenAIClient
+        from markstar.ai.config import StarBotConfig
+        from markstar.ai.tools import ProjectTools
+
+        cfg = StarBotConfig.load()
+        if not cfg.is_configured():
+            panel.add_tool("no connection — set one up in Project → StarBot…")
+            return None
+        try:
+            client = OpenAIClient(cfg)
+        except Exception as exc:  # noqa: BLE001
+            panel.add_tool(f"client error: {exc}")
+            return None
+        self._starbot_chat = StarBotChat(
+            client, tools=ProjectTools(self._project_root())
+        )
+        return self._starbot_chat
+
+    async def _starbot_turn(self, chat, panel: StarBotPanel, text: str) -> None:
+        panel.set_thinking(True)
+
+        def emit(event) -> None:
+            kind = event[0]
+            if kind == "text":
+                panel.append_assistant(event[1])
+            elif kind == "tool":
+                panel.add_tool(event[1])
+            elif kind == "done":
+                panel.finish_assistant()
+
+        try:
+            await chat.send(text, emit)
+        except Exception as exc:  # noqa: BLE001 — surface any API/network error
+            panel.add_tool(f"error: {exc}")
+            panel.finish_assistant()
 
     def cmd_toggle_zen(self) -> None:
         """Distraction-free: empty the tab ribbon and footer text (but keep their

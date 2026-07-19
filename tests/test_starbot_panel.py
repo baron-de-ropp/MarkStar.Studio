@@ -1,0 +1,78 @@
+"""StarBot chat panel: toggle, streaming into the transcript, unconfigured guard."""
+
+from __future__ import annotations
+
+import asyncio
+
+from markstar.app import MarkStarApp
+from markstar.ui.starbot_panel import StarBotPanel
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _log_texts(app):
+    return [str(c.render()) for c in app.query_one("#sb-log").children]
+
+
+class _StubChat:
+    async def send(self, text, emit):
+        emit(("tool", 'grep "sigil"'))
+        emit(("text", "Two slips found."))
+        emit(("done", None))
+
+
+def test_ctrl_k_toggles_panel() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panel = app.query_one("#starbot-panel", StarBotPanel)
+            before = panel.is_open
+            app.cmd_toggle_starbot()
+            await pilot.pause()
+            opened = panel.is_open
+            app.cmd_toggle_starbot()
+            await pilot.pause()
+            return before, opened, panel.is_open
+
+    before, opened, closed = _run(go())
+    assert before is False and opened is True and closed is False
+
+
+def test_submit_streams_reply_into_transcript() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(160, 24)) as pilot:
+            await pilot.pause()
+            app._starbot_chat = _StubChat()
+            app.cmd_toggle_starbot()
+            await pilot.pause()
+            app._on_starbot_submit(StarBotPanel.Submitted("check sigils"))
+            for _ in range(6):
+                await pilot.pause()
+            return _log_texts(app)
+
+    texts = _run(go())
+    joined = "\n".join(texts)
+    assert "You" in joined
+    assert 'grep "sigil"' in joined     # tool-activity line
+    assert "Two slips found." in joined  # streamed assistant text
+
+
+def test_unconfigured_guides_user_to_config(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("STARBOT_CONFIG", str(tmp_path / "none.toml"))
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.cmd_toggle_starbot()
+            await pilot.pause()
+            app._on_starbot_submit(StarBotPanel.Submitted("hi"))
+            await pilot.pause()
+            return _log_texts(app)
+
+    texts = _run(go())
+    assert any("StarBot…" in t or "no connection" in t for t in texts)
