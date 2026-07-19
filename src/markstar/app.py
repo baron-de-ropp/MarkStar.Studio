@@ -579,10 +579,6 @@ class MarkStarApp(App[None]):
     }
     """
 
-    # Matches design-spec prose measure / margin defaults (Preferences later).
-    _PROSE_MARGIN_LEFT = 5
-    _PROSE_MAX_WIDTH = 120
-
     # Menu: Esc is primary (Word/Works-style). F9 is the alternate.
     # Esc also dismisses find/modals when those are open (see action_esc_key).
     # Everything else is bound from the command registry in on_mount(); only the

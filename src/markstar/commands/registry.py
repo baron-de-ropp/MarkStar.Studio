@@ -69,7 +69,12 @@ class CommandRegistry:
         return grouped
 
     def menu_names(self) -> list[str]:
-        """Stable menu order for the bar."""
+        """Stable menu order for the bar.
+
+        `order` is the full intended layout, including menus (Insert, Project)
+        that no command populates yet — the `in present` filter drops any empty
+        one, so unpopulated names are never shown; they just reserve their slot.
+        """
         order = ["File", "Edit", "View", "Insert", "Format", "Tools", "Project", "Help"]
         present = self.menus()
         names = [n for n in order if n in present]
