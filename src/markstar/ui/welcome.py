@@ -37,6 +37,10 @@ _STAR = [
     "╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝",
 ]
 
+# Widest full-logo line, plus a little breathing room. Below this the big block
+# wraps and looks broken, so we fall back to a one-line wordmark.
+_LOGO_MIN_WIDTH = len(_MARK[0]) + len(_STAR[0]) + 4
+
 
 class WelcomeScreen(ModalScreen):
     """Centered logo + a folder path field. Enter confirms, Esc skips."""
@@ -56,6 +60,11 @@ class WelcomeScreen(ModalScreen):
         width: auto;
         content-align: center middle;
         padding: 0 0 1 0;
+    }
+    /* One-line wordmark on narrow terminals — give it weight + a little air. */
+    #welcome-logo.compact {
+        text-style: bold;
+        padding: 1 0 1 0;
     }
     #welcome-tagline {
         width: 100%;
@@ -124,21 +133,50 @@ class WelcomeScreen(ModalScreen):
         self._version = version
         self._recent = recent or []
 
-    def _logo_markup(self) -> str:
+    def _logo_markup(self, compact: bool | None = None) -> str:
         mark = token(self.app, "md-heading")  # "MARK" — heading color
         star = token(self.app, "hint-key")    # "STAR" — accent
+        if compact is None:
+            compact = self._should_compact()
+        if compact:
+            # One-line wordmark for narrow terminals — the block logo would wrap.
+            return f"[{mark}]MARK[/][{star}]★STAR[/]"
         lines = [
             f"[{mark}]{m}[/][{star}]{s}[/]" for m, s in zip(_MARK, _STAR)
         ]
         return "\n".join(lines)
 
+    def _should_compact(self) -> bool:
+        try:
+            return self.app.size.width < _LOGO_MIN_WIDTH
+        except Exception:
+            return False
+
+    def _refresh_logo(self) -> None:
+        compact = self._should_compact()
+        try:
+            logo = self.query_one("#welcome-logo", Static)
+            logo.update(self._logo_markup(compact))
+            logo.set_class(compact, "compact")
+        except Exception:
+            pass
+        try:
+            tagline = self.query_one("#welcome-tagline", Static)
+            tagline.update(
+                "markstar.studio"
+                if compact
+                else "A Markdown-native word processor  ·  markstar.studio"
+            )
+        except Exception:
+            pass
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._refresh_logo()
+
     def compose(self) -> ComposeResult:
         with Vertical(id="welcome-box"):
             yield Static(self._logo_markup(), id="welcome-logo", markup=True)
-            yield Static(
-                "A Markdown-native word processor  ·  markstar.studio",
-                id="welcome-tagline",
-            )
+            yield Static("", id="welcome-tagline")
             yield Static("Choose your project folder", id="welcome-prompt")
             yield Input(
                 value=str(self._default_dir),
@@ -166,6 +204,7 @@ class WelcomeScreen(ModalScreen):
         )
 
     def on_mount(self) -> None:
+        self._refresh_logo()
         self.query_one("#welcome-folder", Input).focus()
 
     def _recent_label(self, path: Path) -> str:

@@ -8,11 +8,50 @@ from unittest.mock import AsyncMock, patch
 from markstar import __version__
 from markstar.app import MarkStarApp
 from markstar.ui.project_panel import ProjectPanel
-from markstar.ui.welcome import WelcomeScreen
+from markstar.ui.welcome import WelcomeScreen, _LOGO_MIN_WIDTH
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_welcome_logo_compacts_on_narrow_terminal() -> None:
+    """Below the block-logo width the welcome shows a one-line wordmark instead of
+    the multi-line ANSI logo (which would wrap/clip), and swaps back when widened."""
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(100, 32)) as pilot:
+            await pilot.pause()
+            scr = WelcomeScreen(app._project_root(), __version__, [])
+            await app.push_screen(scr)
+            await pilot.pause()
+            logo = scr.query_one("#welcome-logo")
+            # The markup the two modes produce: block logo is multi-line, the
+            # compact wordmark is a single line.
+            wide_lines = scr._logo_markup(compact=False).count("\n")
+            narrow_lines = scr._logo_markup(compact=True).count("\n")
+            wide_compact = logo.has_class("compact")
+
+            await pilot.resize_terminal(_LOGO_MIN_WIDTH - 20, 32)
+            for _ in range(4):
+                await pilot.pause()
+            narrow_compact = logo.has_class("compact")
+
+            await pilot.resize_terminal(100, 32)
+            for _ in range(4):
+                await pilot.pause()
+            restored_compact = logo.has_class("compact")
+            return (
+                wide_compact, wide_lines,
+                narrow_compact, narrow_lines,
+                restored_compact,
+            )
+
+    wide_c, wide_l, narrow_c, narrow_l, restored_c = _run(go())
+    assert wide_c is False and wide_l >= 5      # full multi-line block logo
+    assert narrow_c is True and narrow_l == 0   # single-line wordmark
+    assert restored_c is False                  # swaps back when widened
 
 
 def test_welcome_logo_two_color_rows() -> None:
