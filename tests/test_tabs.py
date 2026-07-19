@@ -126,25 +126,31 @@ def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
     assert prefs.min_panel_width == 40  # new default
 
 
-def test_zen_mode_hides_and_restores_chrome() -> None:
+def test_zen_hides_content_but_keeps_rules_and_dimensions() -> None:
+    """Zen empties the tab chips + footer text but leaves the strips (and their
+    rule lines) in place, so the prose frame doesn't shift."""
+
     async def go():
         app = MarkStarApp()
         async with app.run_test() as pilot:
             await pilot.pause()
-            tab = app.query_one("#tab-strip")
-            foot = app.query_one("#bottom-chrome")
-            before = (tab.display, foot.display)
+            label = app.query_one("#tab-label")
+            hints = app.query_one("#support-hints")
+            strip = app.query_one("#tab-strip")
+            rule = app.query_one("#tab-rule")
+            before = (label.visible, hints.visible)
             app.cmd_toggle_zen()
             await pilot.pause()
-            during = (tab.display, foot.display)
+            during = (label.visible, hints.visible, strip.display, rule.display)
             app.cmd_toggle_zen()
             await pilot.pause()
-            after = (tab.display, foot.display)
+            after = (label.visible, hints.visible)
             return before, during, after
 
     before, during, after = _run(go())
     assert before == (True, True)
-    assert during == (False, False)
+    # content hidden, but the strip and its rule stay on screen
+    assert during == (False, False, True, True)
     assert after == (True, True)
 
 

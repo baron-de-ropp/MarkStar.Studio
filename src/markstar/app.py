@@ -1003,20 +1003,28 @@ class MarkStarApp(App[None]):
         self._refresh_metrics()
         self.call_after_refresh(self._update_prose_rules)
 
-    def _update_prose_rules(self) -> None:
+    def _update_prose_rules(self, _retries: int = 0) -> None:
         """Fill top/bottom rules with ─ to match laid-out width (prose column)."""
+        pending = False
         for rule_id in ("#status-rule", "#tab-rule"):
             try:
                 rule = self.query_one(rule_id, Static)
             except Exception:
                 continue
+            # A hidden/undisplayed rule has no meaningful width — skip it rather
+            # than wait for one. (Retrying forever on a permanently-zero-width
+            # widget is a CPU-pegging repaint loop; that must never happen.)
+            if not rule.display:
+                continue
             # Use the widget's actual laid-out width so we track the prose surface
             width = max(1, rule.size.width)
             if width <= 1:
-                # Layout not ready — try again next frame
-                self.call_after_refresh(self._update_prose_rules)
-                return
+                pending = True
+                continue
             rule.update("─" * width)
+        # Layout not ready yet — retry next frame, but bounded (≈16 frames max).
+        if pending and _retries < 16:
+            self.call_after_refresh(lambda: self._update_prose_rules(_retries + 1))
 
     @on(TextArea.Changed)
     def _on_editor_changed(self, event: TextArea.Changed) -> None:
@@ -2542,13 +2550,16 @@ class MarkStarApp(App[None]):
             pass
 
     def cmd_toggle_zen(self) -> None:
-        """Distraction-free: hide tabs + footer + panel, leave centered prose.
-        (For a truly full-screen canvas, also toggle your terminal's fullscreen,
-        usually F11 — the app can't drive that.)"""
+        """Distraction-free: empty the tab ribbon and footer text (but keep their
+        rule lines and dimensions so the prose frame stays put) and close the
+        panel, leaving centered prose. (For a truly full-screen canvas, also
+        toggle your terminal's fullscreen, usually F11 — the app can't drive that.)"""
         self._zen = not getattr(self, "_zen", False)
-        for sel in ("#tab-strip", "#bottom-chrome"):
+        # Hide only the *contents* — tab chips + footer hints/metrics — so the
+        # top/bottom rule lines and overall dimensions are unchanged.
+        for sel in ("#tab-label", "#support-hints", "#support-metrics"):
             try:
-                self.query_one(sel).display = not self._zen
+                self.query_one(sel).visible = not self._zen
             except Exception:
                 pass
         if self._zen:
