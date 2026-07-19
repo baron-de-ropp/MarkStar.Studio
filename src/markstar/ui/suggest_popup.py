@@ -14,7 +14,17 @@ from textual.widgets.option_list import Option
 
 
 class SuggestPopup(ModalScreen[str]):
-    """Floating suggestion list anchored near the caret."""
+    """Floating suggestion list anchored near the caret.
+
+    Besides the suggestions, it always offers two dictionary actions so a correct
+    word (a name, jargon) can be silenced right from the flyout. Selecting one
+    dismisses with the ADD / IGNORE sentinel; the app handles it.
+    """
+
+    # Sentinels returned via dismiss() — NUL-prefixed so they can't collide with
+    # a real suggestion word.
+    ADD = "\x00add"
+    IGNORE = "\x00ignore"
 
     CSS = """
     SuggestPopup {
@@ -50,7 +60,11 @@ class SuggestPopup(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         options = [Option(s, id=s) for s in self._suggestions]
         if not options:
-            options = [Option("(no suggestions)", disabled=True)]
+            options.append(Option("(no suggestions)", disabled=True))
+        # Dictionary actions — always available, even with no suggestions.
+        options.append(Option("─" * 3, disabled=True))
+        options.append(Option("＋ Add to dictionary", id=self.ADD))
+        options.append(Option("⊘ Ignore this session", id=self.IGNORE))
         yield OptionList(*options, id="suggest-list")
 
     def on_mount(self) -> None:

@@ -2217,10 +2217,9 @@ class MarkStarApp(App[None]):
         if self._speller.known(word):
             self.notify(f"“{word}” is spelled correctly")
             return
+        # Open the flyout even with no suggestions — the Add/Ignore actions are
+        # always available (e.g. for a correctly-spelled name or bit of jargon).
         suggestions = self._speller.suggestions(word)
-        if not suggestions:
-            self.notify(f"No suggestions for “{word}”")
-            return
         off = editor.cursor_screen_offset
         self.run_worker(self._suggest_async(row, a, b, word, suggestions, off))
 
@@ -2239,6 +2238,20 @@ class MarkStarApp(App[None]):
         if not chosen:
             return
         editor = self.query_one("#editor", TextArea)
+        if chosen == SuggestPopup.ADD:
+            self._speller.add(word)
+            self.prefs.spell_added = self._speller.added_words
+            self.prefs.save()
+            self.notify(f"Added “{word}” to your dictionary")
+            self._run_spellcheck()  # drop the underline now that it's known
+            editor.focus()
+            return
+        if chosen == SuggestPopup.IGNORE:
+            self._speller.ignore(word)
+            self.notify(f"Ignoring “{word}” this session")
+            self._run_spellcheck()
+            editor.focus()
+            return
         # Recompute the span (nothing else could edit while the modal was up).
         line = editor.document.get_line(row)
         if line[a:b] == word:

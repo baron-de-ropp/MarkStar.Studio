@@ -6,6 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from markstar.app import MarkStarApp, MarkStarTextArea
+from markstar.ui.suggest_popup import SuggestPopup
 
 
 def _run(coro):
@@ -74,3 +75,56 @@ def test_cancel_leaves_word_unchanged() -> None:
             return ed.text
 
     assert _run(go()) == "a quikc word"
+
+
+def test_add_to_dictionary_from_popup_persists_and_leaves_text() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(90, 16)) as pilot:
+            app._speller.prime()
+            ed = app.query_one("#editor", MarkStarTextArea)
+            ed.load_text("a frobnitz here")
+            app.document.set_text("a frobnitz here")
+            ed.move_cursor((0, 4))
+            await pilot.pause()
+            with patch.object(
+                app, "push_screen_wait", AsyncMock(return_value=SuggestPopup.ADD)
+            ):
+                await app._suggest_async(
+                    0, 2, 10, "frobnitz", [], ed.cursor_screen_offset
+                )
+                await pilot.pause()
+            return (
+                ed.text,
+                app._speller.known("frobnitz"),
+                "frobnitz" in app.prefs.spell_added,
+            )
+
+    text, known, in_prefs = _run(go())
+    assert text == "a frobnitz here"  # word not replaced
+    assert known is True  # now in the dictionary
+    assert in_prefs is True  # persisted to preferences
+
+
+def test_ignore_from_popup_silences_for_session_only() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(90, 16)) as pilot:
+            app._speller.prime()
+            ed = app.query_one("#editor", MarkStarTextArea)
+            ed.load_text("a frobnitz here")
+            app.document.set_text("a frobnitz here")
+            ed.move_cursor((0, 4))
+            await pilot.pause()
+            with patch.object(
+                app, "push_screen_wait", AsyncMock(return_value=SuggestPopup.IGNORE)
+            ):
+                await app._suggest_async(
+                    0, 2, 10, "frobnitz", [], ed.cursor_screen_offset
+                )
+                await pilot.pause()
+            return app._speller.known("frobnitz"), "frobnitz" in app.prefs.spell_added
+
+    known, in_prefs = _run(go())
+    assert known is True  # ignored → treated as known this session
+    assert in_prefs is False  # but NOT persisted to the dictionary
