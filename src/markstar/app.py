@@ -906,12 +906,11 @@ class MarkStarApp(App[None]):
             # step behind self.theme (it updates on a later refresh), which would
             # give the editor the *previous* theme's background.
             theme_obj = self.get_theme(self.theme)
-            if theme_obj is not None:
-                bg = theme_obj.background
-                fg = theme_obj.foreground
-                sel = theme_obj.variables.get("search-match", theme_obj.primary)
-            else:
-                bg, fg, sel = "#1E1E1E", "#D4D4D4", "#264F78"
+            if theme_obj is None:
+                return  # no hardcoded fallback — every color comes from the theme
+            bg = theme_obj.background
+            fg = theme_obj.foreground
+            sel = theme_obj.variables.get("search-match", theme_obj.primary)
             ed_name = f"ms-editor-{self.theme}"
             themed = dataclasses.replace(
                 base,
