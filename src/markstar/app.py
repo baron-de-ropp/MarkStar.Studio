@@ -198,6 +198,15 @@ class MarkStarTextArea(TextArea):
         self._line_cache.clear()
         self.refresh()
 
+    def action_paste(self) -> None:
+        """Ctrl+V: paste the OS clipboard (so text copied in other apps works),
+        falling back to Textual's internal clipboard when no native tool exists.
+        """
+        native = self.app._native_clipboard_paste()  # type: ignore[attr-defined]
+        if native is not None:
+            self.app._clipboard = native  # what super().action_paste() reads
+        super().action_paste()
+
     def _location_over_link(self, event: events.MouseMove) -> bool:
         """True if the mouse is over a ``[text](url)`` span."""
         try:
@@ -1664,6 +1673,48 @@ class MarkStarApp(App[None]):
                 return
             except Exception:
                 continue
+
+    @staticmethod
+    def _native_clipboard_paste() -> str | None:
+        """Read the OS clipboard so Ctrl+V pastes what was copied in *other*
+        apps too. Returns None if no native tool is available (callers then
+        fall back to Textual's internal clipboard). Per-OS dispatch.
+        """
+        import os
+        import shutil
+        import subprocess
+
+        if sys.platform == "win32":
+            candidates = [["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"]]
+        elif sys.platform == "darwin":
+            candidates = [["pbpaste"]]
+        else:
+            candidates = []
+            if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-paste"):
+                candidates.append(["wl-paste", "--no-newline"])
+            if os.environ.get("DISPLAY"):
+                if shutil.which("xclip"):
+                    candidates.append(["xclip", "-selection", "clipboard", "-o"])
+                if shutil.which("xsel"):
+                    candidates.append(["xsel", "--clipboard", "--output"])
+
+        for cmd in candidates:
+            try:
+                out = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                    check=True,
+                )
+                text = out.stdout.decode("utf-8", "replace")
+                # PowerShell's Get-Clipboard appends a trailing CRLF; trim one.
+                if sys.platform == "win32":
+                    text = text.rstrip("\r\n")
+                return text
+            except Exception:
+                continue
+        return None
 
     def cmd_toggle_mouse_capture(self) -> None:
         """Toggle terminal mouse tracking.

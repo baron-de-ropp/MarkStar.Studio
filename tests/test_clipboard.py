@@ -46,6 +46,48 @@ def test_ctrl_c_copies_selection_and_never_quits() -> None:
     assert not any("quit" in str(t).lower() for t in toasts)
 
 
+def test_ctrl_v_pastes_os_clipboard() -> None:
+    """Ctrl+V pulls the OS clipboard (cross-app copy), primed via the native
+    reader, so text copied in another app pastes into the editor."""
+
+    async def go():
+        app = MarkStarApp()
+        with patch.object(
+            MarkStarApp, "_native_clipboard_paste", return_value="FROM_BROWSER"
+        ):
+            async with app.run_test() as pilot:
+                ed = app.query_one("#editor")
+                ed.load_text("start ")
+                ed.focus()
+                ed.move_cursor((0, 6))
+                await pilot.pause()
+                await pilot.press("ctrl+v")
+                await pilot.pause()
+                return ed.text
+
+    assert _run(go()) == "start FROM_BROWSER"
+
+
+def test_paste_falls_back_to_internal_clipboard() -> None:
+    """When no native tool is available, Ctrl+V uses Textual's clipboard."""
+
+    async def go():
+        app = MarkStarApp()
+        with patch.object(MarkStarApp, "_native_clipboard_paste", return_value=None):
+            async with app.run_test() as pilot:
+                ed = app.query_one("#editor")
+                ed.load_text("start ")
+                ed.focus()
+                ed.move_cursor((0, 6))
+                app._clipboard = "INTERNAL"
+                await pilot.pause()
+                await pilot.press("ctrl+v")
+                await pilot.pause()
+                return ed.text
+
+    assert _run(go()) == "start INTERNAL"
+
+
 def test_native_clipboard_platform_dispatch() -> None:
     calls: list = []
     with patch("subprocess.run", side_effect=lambda cmd, **k: calls.append(cmd)):
