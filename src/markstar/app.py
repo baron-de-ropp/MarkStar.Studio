@@ -58,6 +58,7 @@ from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree, is_openable
 from markstar.ui.spell_bar import SpellBar
 from markstar.ui.spell_controller import SpellController
+from markstar.ui.starbot_config import StarBotConfigScreen
 from markstar.ui.theme_picker import ThemePicker
 from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
@@ -757,6 +758,8 @@ class MarkStarApp(App[None]):
         add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("theme_picker", "Theme…", "View", self.cmd_theme_picker)
+
+        add("starbot_config", "StarBot…", "Project", self.cmd_starbot_config)
 
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
         add("about", "About…", "Help", self.cmd_about)
@@ -2246,6 +2249,10 @@ class MarkStarApp(App[None]):
     @on(SpellBar.Dismissed)
     def _on_spell_dismissed(self) -> None:
         self._spell.on_dismissed()
+
+    def cmd_starbot_config(self) -> None:
+        """Project → StarBot… — configure the AI assistant connection."""
+        self.push_screen(StarBotConfigScreen())
 
     def cmd_toggle_zen(self) -> None:
         """Distraction-free: empty the tab ribbon and footer text (but keep their

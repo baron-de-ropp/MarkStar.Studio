@@ -13,6 +13,7 @@ authors = [{ name = "Ryan Baron de Ropp", email = "daudzegir@gmail.com" }]
 dependencies = [
   "textual>=0.80.0",
   "pyspellchecker>=0.8",
+  "openai>=1.40",  # StarBot: OpenAI-compatible chat/tool calling (any endpoint)
 ]
 
 [project.optional-dependencies]
