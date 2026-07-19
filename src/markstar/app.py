@@ -21,6 +21,7 @@ from textual.widgets.text_area import Selection
 
 from markstar import __version__
 from markstar.commands.registry import Command, CommandRegistry
+from markstar.config import Preferences
 from markstar.domain.document import Document
 from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
 from markstar.domain.search import (
@@ -494,11 +495,14 @@ class MarkStarApp(App[None]):
         Binding("ctrl+c", "smart_copy", "Copy", show=False, priority=True),
     ]
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self, path: Path | None = None, prefs: Preferences | None = None
+    ) -> None:
         super().__init__()
+        self.prefs = prefs or Preferences()
         self.register_theme(VSCODE_DARK)
         self.register_theme(MARKSTAR_LIGHT)
-        self.theme = DEFAULT_THEME_NAME
+        self.theme = self.prefs.theme  # validated to a known theme on load
         self._path_arg = path
         self.workspace = Workspace()
         self._syncing = False
@@ -650,7 +654,9 @@ class MarkStarApp(App[None]):
         self._refresh_support_hints()
 
         editor = self.query_one("#editor", MarkStarTextArea)
-        editor.soft_wrap = True
+        # Apply saved preferences.
+        editor.soft_wrap = self.prefs.soft_wrap
+        editor.render_markdown = self.prefs.formatting
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
@@ -1598,6 +1604,8 @@ class MarkStarApp(App[None]):
     def cmd_toggle_soft_wrap(self) -> None:
         editor = self.query_one("#editor", TextArea)
         editor.soft_wrap = not editor.soft_wrap
+        self.prefs.soft_wrap = editor.soft_wrap
+        self.prefs.save()
         self.notify(f"Soft wrap {'on' if editor.soft_wrap else 'off'}")
 
     def action_smart_copy(self) -> None:
@@ -1680,6 +1688,8 @@ class MarkStarApp(App[None]):
             except Exception:
                 pass
             driver._mouse = False
+            self.prefs.mouse = "off"
+            self.prefs.save()
             self.notify(
                 "Mouse released — native pointer & selection (View menu re-enables)"
             )
@@ -1689,12 +1699,16 @@ class MarkStarApp(App[None]):
                 driver._enable_mouse_support()
             except Exception:
                 pass
+            self.prefs.mouse = "on"
+            self.prefs.save()
             self.notify("Mouse captured — click, scroll, and hover enabled")
 
     def cmd_toggle_formatting(self) -> None:
         """Toggle inline Markdown rendering (bold/italic/code shown vs. raw)."""
         editor = self.query_one("#editor", MarkStarTextArea)
         editor.set_render_markdown(not editor.render_markdown)
+        self.prefs.formatting = editor.render_markdown
+        self.prefs.save()
         self.notify(
             f"Formatting preview {'on' if editor.render_markdown else 'off'}"
         )
@@ -1717,6 +1731,8 @@ class MarkStarApp(App[None]):
             self.query_one("#find-bar", FindBar)._refresh_hints()
         except Exception:
             pass
+        self.prefs.theme = self.theme
+        self.prefs.save()
         self.notify(f"Theme: {self.theme}")
 
     def cmd_about(self) -> None:
@@ -2017,31 +2033,13 @@ class _ConfirmDialog(ModalScreen[bool]):
         self.dismiss(True)
 
 
-def _default_mouse_capture() -> bool:
-    """Pick the mouse-capture default for this platform/terminal.
-
-    Capture ON when it costs nothing pointer-wise:
-    - Terminals honoring OSC 22 (kitty, Ghostty, WezTerm, foot) show our
-      I-beam/hand while captured.
-    - Windows Terminal / conhost show an ARROW even with capture off
-      (microsoft/terminal#1441), so releasing gains nothing — keep clicks.
-    Capture OFF elsewhere (VTE/GNOME Terminal, macOS Terminal.app, unknown):
-    releasing restores the terminal's native I-beam and selection for writers.
-    """
-    if sys.platform == "win32":
-        return True
-    return _terminal_renders_pointer_shapes()
-
-
 def _terminal_renders_pointer_shapes() -> bool:
     """Best-effort: does this terminal honor OSC 22 pointer shapes?
 
-    Terminals that do (kitty, Ghostty, WezTerm, foot) show our I-beam/hand
-    while the mouse is captured, so capture costs nothing there. Terminals
-    that don't (VTE/GNOME Terminal, Windows conhost, …) show an arrow while
-    any app tracks the mouse — for those we default capture OFF so writers
-    keep the native text caret. Detection is by environment markers; no
-    escape-sequence round-trip.
+    Not used for the mouse *default* (we always capture — see main), but tells
+    us whether our ``pointer: text`` request will actually show an I-beam while
+    captured (kitty/Ghostty/WezTerm/foot) vs. be ignored (VTE, conhost, …).
+    Detection is by environment markers; no escape-sequence round-trip.
     """
     import os
 
@@ -2076,16 +2074,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--version", action="version", version=f"MarkStar {__version__}")
     args = parser.parse_args(argv)
 
+    prefs = Preferences.load()
+
+    # Mouse capture: CLI flag wins for this run; else the saved pref; else the
+    # default, which is ON everywhere — click-to-position, wheel-scrolls-view,
+    # drag-select. (Capture OFF is the opt-in "native terminal I-beam &
+    # selection" mode via --no-mouse / View > Mouse Capture / prefs.)
     if args.mouse:
         mouse = True
     elif args.no_mouse:
         mouse = False
-    else:
-        # Per-platform/terminal default — see _default_mouse_capture().
-        # View > Mouse Capture toggles at runtime either way.
-        mouse = _default_mouse_capture()
+    elif prefs.mouse == "off":
+        mouse = False
+    else:  # "on" or "auto" (default)
+        mouse = True
 
-    app = MarkStarApp(path=args.path)
+    app = MarkStarApp(path=args.path, prefs=prefs)
     app.run(mouse=mouse)
 
 

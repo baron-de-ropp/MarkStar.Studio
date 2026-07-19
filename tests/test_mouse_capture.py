@@ -56,22 +56,44 @@ def test_toggle_mouse_capture_writes_tracking_sequences() -> None:
     assert recaptured
 
 
-def test_default_capture_follows_terminal_capability() -> None:
+def test_default_mouse_capture_is_on() -> None:
+    """Default is capture ON everywhere (click-to-position + wheel scroll);
+    only an explicit pref/flag of 'off' releases the mouse."""
+    import os
     from unittest.mock import patch
 
-    from markstar.app import _default_mouse_capture, _terminal_renders_pointer_shapes
+    from markstar.app import main
+    from markstar.config import Preferences
+
+    captured: dict = {}
+
+    def fake_run(self, *a, **k):
+        captured["mouse"] = k.get("mouse")
+
+    with patch.dict(
+        os.environ,
+        {"MARKSTAR_CONFIG": "/nonexistent/markstar.toml", "TERM": "xterm-256color"},
+        clear=False,
+    ):
+        with patch("markstar.app.MarkStarApp.run", fake_run):
+            main([])
+    assert captured["mouse"] is True  # ON even on non-OSC22 terminal
+
+    with patch.object(Preferences, "load", return_value=Preferences(mouse="off")):
+        with patch("markstar.app.MarkStarApp.run", fake_run):
+            main([])
+    assert captured["mouse"] is False
+
+
+def test_pointer_shape_detection() -> None:
+    from unittest.mock import patch
+
+    from markstar.app import _terminal_renders_pointer_shapes
 
     with patch.dict("os.environ", {"TERM": "xterm-256color"}, clear=True):
-        assert _terminal_renders_pointer_shapes() is False  # VTE → I-beam default
-        assert _default_mouse_capture() is False
+        assert _terminal_renders_pointer_shapes() is False  # VTE
     with patch.dict("os.environ", {"TERM": "xterm-kitty", "KITTY_WINDOW_ID": "1"}, clear=True):
-        assert _terminal_renders_pointer_shapes() is True  # kitty → capture on
-
-    # Windows: arrow pointer either way (ms/terminal#1441) → keep clicks.
-    with patch("markstar.app.sys") as fake_sys:
-        fake_sys.platform = "win32"
-        with patch.dict("os.environ", {}, clear=True):
-            assert _default_mouse_capture() is True
+        assert _terminal_renders_pointer_shapes() is True  # kitty
 
 
 def test_toggle_survives_driver_without_methods() -> None:
