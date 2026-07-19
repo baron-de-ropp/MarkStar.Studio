@@ -36,6 +36,7 @@ from markstar.domain.workspace import Workspace
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
+from markstar.ui.project_panel import ProjectPanel, WriterTree
 from markstar.ui.themes import (
     DEFAULT_THEME_NAME,
     MARKSTAR_LIGHT,
@@ -373,6 +374,8 @@ class MarkStarApp(App[None]):
         height: 1fr;
         width: 100%;
         background: $background;
+        /* Project panel overlays the left of this band without shifting prose. */
+        layers: base overlay;
     }
 
     #editor-left-pad {
@@ -523,6 +526,15 @@ class MarkStarApp(App[None]):
     def document(self) -> Document:
         return self.workspace.active
 
+    def _project_root(self) -> Path:
+        """Root folder for the project panel: the opened file's dir, or cwd."""
+        if self._path_arg is not None:
+            try:
+                return self._path_arg if self._path_arg.is_dir() else self._path_arg.parent
+            except OSError:
+                pass
+        return Path.cwd()
+
     def _build_commands(self) -> None:
         r = self.registry
 
@@ -549,6 +561,7 @@ class MarkStarApp(App[None]):
         # (no portable single key worth spending; they're infrequent).
         add("new_file", "New File", "File", self.cmd_new_file, "ctrl+n")
         add("open_file", "Open File…", "File", self.cmd_open_file, "ctrl+o")
+        add("open_folder", "Open Folder…", "File", self.cmd_open_folder)  # menu
         add("close", "Close", "File", self.cmd_close, "ctrl+w")
         add("close_others", "Close Others", "File", self.cmd_close_others)  # menu only
         add("close_all", "Close All", "File", self.cmd_close_all)  # menu only
@@ -600,6 +613,13 @@ class MarkStarApp(App[None]):
         add("fmt_fence", "Code Fence", "Format", self.cmd_code_fence)
 
         # View
+        add(
+            "toggle_project",
+            "Project Panel",
+            "View",
+            self.cmd_toggle_project_panel,
+            "ctrl+p",
+        )
         add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+pagedown")
         add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
@@ -628,6 +648,7 @@ class MarkStarApp(App[None]):
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
             with Horizontal(id="editor-row"):
+                yield ProjectPanel(self._project_root(), id="project-panel")
                 yield Static("", id="editor-left-pad")
                 yield MarkStarTextArea(id="editor")
             with Vertical(id="bottom-chrome"):
@@ -681,7 +702,18 @@ class MarkStarApp(App[None]):
             pass
 
         if self._path_arg is not None:
-            if self._path_arg.exists():
+            try:
+                is_dir = self._path_arg.is_dir()
+            except OSError:
+                is_dir = False
+            if is_dir:
+                # Launched with a folder → open the project panel at that root,
+                # leaving an empty buffer to write in.
+                try:
+                    self.query_one("#project-panel", ProjectPanel).open()
+                except Exception:
+                    pass
+            elif self._path_arg.exists():
                 self.workspace.open_path(self._path_arg)
             else:
                 self.workspace.active.path = self._path_arg
@@ -871,6 +903,17 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
 
+        # Project panel: close it (and return focus to the editor) before Esc
+        # falls through to summoning the menu.
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+            if panel.is_open:
+                panel.close()
+                self.query_one("#editor", TextArea).focus()
+                return
+        except Exception:
+            pass
+
         self._toggle_menu(None)
 
     def on_key(self, event: Key) -> None:
@@ -901,6 +944,10 @@ class MarkStarApp(App[None]):
         if key == "ctrl+pageup":
             event.stop()
             self.cmd_prev_tab()
+            return
+        if key == "ctrl+p":
+            event.stop()
+            self.cmd_toggle_project_panel()
             return
         if key == "ctrl+b":
             event.stop()
@@ -982,6 +1029,68 @@ class MarkStarApp(App[None]):
             self.notify(f"Opened {path}")
         else:
             self.notify(f"New buffer for {path} (not on disk yet)")
+
+    def cmd_toggle_project_panel(self) -> None:
+        """Show/hide the left project-file overlay."""
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+        except Exception:
+            return
+        if panel.is_open:
+            panel.close()
+            self.query_one("#editor", TextArea).focus()
+        else:
+            panel.open()
+            panel.focus_tree()
+
+    def action_toggle_project(self) -> None:
+        self.cmd_toggle_project_panel()
+
+    def cmd_open_folder(self) -> None:
+        """Prompt for a folder and point the project panel at it (opens it)."""
+        self.run_worker(self._open_folder_async())
+
+    async def _open_folder_async(self) -> None:
+        raw = await self.push_screen_wait(
+            _PathPrompt(
+                "Open Folder — enter a directory path",
+                initial=str(self._project_root()) + "/",
+                hint="Enter open · Esc cancel · ~ allowed",
+            )
+        )
+        if raw is None:
+            return
+        text = raw.strip().strip('"').strip("'")
+        if not text:
+            return
+        path = Path(text).expanduser()
+        if not path.is_dir():
+            self.notify(f"Not a folder: {path}", severity="warning")
+            return
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+        except Exception:
+            return
+        panel.set_root(path)
+        panel.open()
+        panel.focus_tree()
+        self.notify(f"Project: {path.name or path}")
+
+    @on(WriterTree.FileSelected)
+    def _on_tree_file_selected(self, event: WriterTree.FileSelected) -> None:
+        """Open the chosen file in a tab (keep the panel open for browsing)."""
+        event.stop()
+        self._sync_document_from_editor()
+        try:
+            self.workspace.open_path(Path(event.path))
+        except OSError as exc:
+            self.notify(f"Open failed: {exc}", severity="error")
+            return
+        self._last_find_end = 0
+        self._load_active_into_editor()
+        self._refresh_status()
+        self.query_one("#editor", TextArea).focus()
+        self.notify(f"Opened {Path(event.path).name}")
 
     def cmd_close(self) -> None:
         self._sync_document_from_editor()
