@@ -54,6 +54,7 @@ from markstar.domain.spellcheck import Speller, find_misspellings
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.editor_session import EditorSession
+from markstar.ui.layout import ProseLayout, compute_layout
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
@@ -73,14 +74,7 @@ from markstar.ui.themes import (
 # See docs/MARKSTAR_KEYMAP.md §5b for the "style spans, never hide characters"
 # approach that keeps document columns 1:1 with screen columns.
 
-# --- Layout geometry (see _compute_layout / _update_prose_layout) -------------
-# Side inset (left/right margin of the prose column) — wider on roomy windows,
-# tighter on narrow ones, switching at the breakpoint.
-_SIDE_INSET_WIDE = 5
-_SIDE_INSET_NARROW = 2
-_NARROW_BREAKPOINT = 90       # window width at/above which the wide inset applies
-_MIN_PROSE_COLS = 24          # prose never shrinks below this behind the panel
-_MIN_PANEL_COLS = 15          # project panel floor (mirrors config clamp low bound)
+# Prose-layout geometry constants + compute_layout() live in ui/layout.py.
 # Footer metrics compaction thresholds (see _refresh_metrics).
 _METRICS_NARROW = 66          # below: drop the least-important metric
 _METRICS_MEDIUM = 92          # below: compact labels
@@ -926,35 +920,16 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
 
-    def _compute_layout(self, width: int, panel_open: bool) -> tuple[int, int, int, int]:
-        """Pure layout math → (panel_cols, left_pad, prose_cols, right_pad).
-
-        The prose column lives to the RIGHT of the (overlay) panel and centers in
-        the space that's left, so nothing is ever hidden under the panel. The
-        panel is clamped so prose always keeps >= ~24 columns.
-        """
-        panel = 0
-        if panel_open:
-            panel = max(
-                _MIN_PANEL_COLS,
-                min(self.prefs.min_panel_width, width - _MIN_PROSE_COLS),
-            )
-            panel = max(0, panel)
-        # The panel is an OVERLAY (its own layer) — it floats on top of the prose
-        # and does NOT reserve width. So the prose column is always centered in the
-        # full window; the panel simply covers whatever it covers. On a window too
-        # narrow to clear it, the panel overlaps the text, which is acceptable.
-        available = max(1, width)
-        base = _SIDE_INSET_WIDE if width >= _NARROW_BREAKPOINT else _SIDE_INSET_NARROW
-        if self.prefs.center_text:
-            col = min(self.prefs.prose_width, max(1, available - 2 * base))
-            side = max(base, (available - col) // 2)
-        else:
-            side = base
-            col = max(1, available - 2 * base)
-        left_pad = side
-        right_pad = max(0, width - left_pad - col)
-        return panel, left_pad, col, right_pad
+    def _compute_layout(self, width: int, panel_open: bool) -> ProseLayout:
+        """Prose column geometry for ``width`` — pure math in ui/layout.py, fed
+        the relevant preferences."""
+        return compute_layout(
+            width,
+            panel_open,
+            center_text=self.prefs.center_text,
+            prose_width=self.prefs.prose_width,
+            min_panel_width=self.prefs.min_panel_width,
+        )
 
     def _panel_open(self) -> bool:
         try:
