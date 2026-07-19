@@ -89,7 +89,7 @@ class SpellBar(Vertical):
         width: 100%;
     }
     SpellBar .spell-label {
-        width: 8;
+        width: 12;
         height: 1;
         color: $text-muted;
         content-align: left middle;
@@ -147,11 +147,11 @@ class SpellBar(Vertical):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="spell-word-row"):
-            yield Static("Word", classes="spell-label")
+            yield Static("Not in Dict", classes="spell-label")
             yield Static("", id="spell-word")
             yield Static("", id="spell-count")
         with Horizontal(id="spell-fix-row"):
-            yield Static("Fix", classes="spell-label")
+            yield Static("Suggestion", classes="spell-label")
             yield SpellInput(id="spell-fix", classes="-textual-compact")
         with Horizontal(id="spell-hint-row"):
             yield Static("", id="spell-hints")
