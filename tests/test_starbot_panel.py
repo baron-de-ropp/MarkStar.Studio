@@ -69,6 +69,43 @@ def test_submit_streams_reply_into_transcript() -> None:
     assert "Two slips found." in joined  # streamed assistant text
 
 
+class _StubClient:
+    async def stream(self, messages, tools=None):
+        yield ("text", "hi there")
+
+
+def test_turn_persists_transcript_and_new_chat_resets(tmp_path) -> None:
+    from markstar.ai.chat import StarBotChat
+    from markstar.ai.history import ChatStore
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._project_root = lambda: tmp_path  # save history under tmp
+            app._starbot_chat = StarBotChat(_StubClient(), tools=None)
+            app.cmd_toggle_starbot()
+            await pilot.pause()
+            app._on_starbot_submit(StarBotPanel.Submitted("hello"))
+            for _ in range(6):
+                await pilot.pause()
+            had = app._starbot_transcript is not None
+            app.cmd_starbot_new_chat()
+            await pilot.pause()
+            return had, app._starbot_transcript, app._starbot_chat
+
+    had, transcript_after, chat_after = _run(go())
+    saved = ChatStore(tmp_path).list()
+    assert had is True
+    assert len(saved) == 1
+    assert any(
+        m.get("role") == "user" and m.get("content") == "hello"
+        for m in saved[0].messages
+    )
+    # New chat cleared the session state (the saved file stays on disk).
+    assert transcript_after is None and chat_after is None
+
+
 def test_unconfigured_guides_user_to_config(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("STARBOT_CONFIG", str(tmp_path / "none.toml"))
 

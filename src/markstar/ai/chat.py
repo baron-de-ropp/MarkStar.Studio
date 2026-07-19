@@ -53,6 +53,10 @@ class StarBotChat:
     def messages(self) -> list[dict[str, Any]]:
         return self._messages
 
+    def restore(self, messages: list[dict[str, Any]]) -> None:
+        """Replace the conversation history (loading a saved transcript)."""
+        self._messages = list(messages)
+
     def _tool_specs(self) -> Optional[list[dict[str, Any]]]:
         if self._tools is None:
             return None

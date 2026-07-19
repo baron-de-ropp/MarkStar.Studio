@@ -609,6 +609,7 @@ class MarkStarApp(App[None]):
         )
         self._autosave_timer = None
         self._starbot_chat = None  # ai.chat.StarBotChat, built lazily on first use
+        self._starbot_transcript = None  # ai.history.ChatTranscript for the session
         self._build_commands()
 
     # Compat accessors so callers/tests keep reaching the speller + walk state.
@@ -762,6 +763,8 @@ class MarkStarApp(App[None]):
         add("theme_picker", "Theme…", "View", self.cmd_theme_picker)
 
         add("toggle_starbot", "StarBot Chat", "Project", self.cmd_toggle_starbot, "ctrl+k")
+        add("starbot_new_chat", "New StarBot Chat", "Project", self.cmd_starbot_new_chat)
+        add("starbot_history", "StarBot History…", "Project", self.cmd_starbot_history)
         add("starbot_config", "StarBot…", "Project", self.cmd_starbot_config)
 
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
@@ -2335,6 +2338,68 @@ class MarkStarApp(App[None]):
         except Exception as exc:  # noqa: BLE001 — surface any API/network error
             panel.add_tool(f"error: {exc}")
             panel.finish_assistant()
+        self._save_starbot_transcript(chat)
+
+    def _save_starbot_transcript(self, chat) -> None:
+        """Persist the current conversation to the project's history folder."""
+        from datetime import datetime
+
+        from markstar.ai.history import ChatStore, ChatTranscript
+
+        messages = getattr(chat, "messages", None)
+        if not messages:
+            return
+        if self._starbot_transcript is None:
+            now = datetime.now()
+            self._starbot_transcript = ChatTranscript(
+                id=now.strftime("%Y-%m-%dT%H-%M-%S"),
+                created=now.isoformat(timespec="seconds"),
+            )
+        self._starbot_transcript.messages = list(messages)
+        ChatStore(self._project_root()).save(self._starbot_transcript)
+
+    def cmd_starbot_new_chat(self) -> None:
+        """Start a fresh StarBot conversation (the old one stays saved)."""
+        self._starbot_chat = None
+        self._starbot_transcript = None
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        panel.clear()
+        if not panel.is_open:
+            panel.open()
+            self._update_prose_layout()
+        panel.focus_input()
+        self.notify("New StarBot chat")
+
+    def cmd_starbot_history(self) -> None:
+        self.run_worker(self._starbot_history_async())
+
+    async def _starbot_history_async(self) -> None:
+        from markstar.ai.history import ChatStore
+        from markstar.ui.starbot_history_screen import ChatHistoryScreen
+
+        store = ChatStore(self._project_root())
+        transcripts = store.list()
+        if not transcripts:
+            self.notify("No saved StarBot chats yet")
+            return
+        chosen = await self.push_screen_wait(ChatHistoryScreen(transcripts))
+        if not chosen:
+            return
+        transcript = store.load(chosen)
+        if transcript is None:
+            return
+        panel = self.query_one("#starbot-panel", StarBotPanel)
+        if not panel.is_open:
+            panel.open()
+            self._update_prose_layout()
+        # Build a fresh chat and restore the saved history into it.
+        self._starbot_chat = None
+        chat = self._ensure_starbot_chat(panel)
+        if chat is not None:
+            chat.restore(transcript.messages)
+        self._starbot_transcript = transcript
+        panel.render_messages(transcript.messages)
+        panel.focus_input()
 
     def cmd_toggle_zen(self) -> None:
         """Distraction-free: empty the tab ribbon and footer text (but keep their

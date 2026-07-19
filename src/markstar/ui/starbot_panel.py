@@ -48,9 +48,14 @@ class StarBotPanel(Vertical):
         background: $boost;
         scrollbar-size-vertical: 1;
         scrollbar-background: $boost;
-        scrollbar-color: $text-muted 35%;
+        /* Same as the editor + project panel scrollbars (app-wide consistency). */
+        scrollbar-color: $text-muted 12%;
+        scrollbar-color-hover: $text-muted 45%;
+        scrollbar-color-active: $text-muted 55%;
     }
-    StarBotPanel .sb-msg { height: auto; padding: 0 0 1 0; }
+    /* Body text matches the project tree's intensity ($tab-inactive) — softer
+       than the editor's primary white. Name labels + tool lines set their own. */
+    StarBotPanel .sb-msg { height: auto; padding: 0 0 1 0; color: $tab-inactive; }
     StarBotPanel #sb-spinner { height: auto; color: $text-muted; }
     /* A blank breathing row sits above the rule (see compose). The Rule widget
        auto-fills the panel's content width, so it always spans the chat area. */
@@ -124,6 +129,36 @@ class StarBotPanel(Vertical):
         self._log().mount(w)
         self.call_after_refresh(lambda: self._log().scroll_end(animate=False))
         return w
+
+    def clear(self) -> None:
+        """Empty the transcript (new chat / before loading a saved one)."""
+        self._assistant = None
+        self._assistant_text = ""
+        for child in list(self._log().children):
+            child.remove()
+
+    def render_messages(self, messages: list[dict]) -> None:
+        """Replay a saved conversation into the transcript."""
+        self.clear()
+        from markstar.ai.tools import ProjectTools
+
+        for m in messages:
+            role = m.get("role")
+            if role == "user":
+                self.add_user(m.get("content") or "")
+            elif role == "assistant":
+                for tc in m.get("tool_calls") or []:
+                    fn = tc.get("function", {})
+                    self.add_tool(
+                        ProjectTools.summarize_call(
+                            fn.get("name", ""), fn.get("arguments", "")
+                        )
+                    )
+                content = (m.get("content") or "").strip()
+                if content:
+                    self._assistant = None
+                    self.append_assistant(content)
+            # system + tool-result messages aren't shown
 
     def add_user(self, text: str) -> None:
         self._add(f"[{self._you_color()}]You[/]\n{_esc(text)}")
