@@ -23,7 +23,7 @@ def _make_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_tree_filters_to_markdown_and_dirs(tmp_path) -> None:
+def test_tree_shows_all_files_but_hides_dotfiles(tmp_path) -> None:
     proj = _make_project(tmp_path)
 
     async def go():
@@ -35,8 +35,9 @@ def test_tree_filters_to_markdown_and_dirs(tmp_path) -> None:
             return sorted(p.name for p in tree.filter_paths(list(proj.iterdir())))
 
     names = _run(go())
-    assert names == ["chapter-01.md", "chapter-02.md", "notes.txt", "sub"]
-    assert ".secret.md" not in names and "cover.png" not in names
+    # All non-hidden entries (incl. images/assets), dotfiles excluded.
+    assert names == ["chapter-01.md", "chapter-02.md", "cover.png", "notes.txt", "sub"]
+    assert ".secret.md" not in names
 
 
 def test_toggle_and_esc(tmp_path) -> None:

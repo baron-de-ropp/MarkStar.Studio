@@ -14,17 +14,15 @@ from rich.style import Style
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import DirectoryTree, Rule, Static
+from textual.widgets import DirectoryTree
 
 from markstar.ui.themes import token
 
-_SHOWN_SUFFIXES = {".md", ".markdown", ".mdown", ".mkd", ".txt"}
-
-
 class WriterTree(DirectoryTree):
-    """DirectoryTree filtered for writers: directories + Markdown/txt files,
-    hidden dot-entries omitted. Quiet ASCII outline icons (spec: no emoji).
-    Open files are brightened; the active file is highlighted."""
+    """DirectoryTree for writers: directories + all files (so images, PDFs, and
+    other link/embed targets are visible), hidden dot-entries omitted. Quiet
+    ASCII outline icons (spec: no emoji). Open files are brightened; the active
+    file is highlighted."""
 
     ICON_NODE = "▸ "           # collapsed folder
     ICON_NODE_EXPANDED = "▾ "  # expanded folder
@@ -46,8 +44,7 @@ class WriterTree(DirectoryTree):
             try:
                 if p.name.startswith("."):
                     continue
-                if p.is_dir() or p.suffix.lower() in _SHOWN_SUFFIXES:
-                    out.append(p)
+                out.append(p)
             except OSError:
                 continue
         return out
@@ -62,10 +59,12 @@ class WriterTree(DirectoryTree):
             key = str(Path(path).resolve())
         except Exception:
             return label
+        # Three tiers: closed = dim (CSS), open = a bit brighter, active =
+        # highlighted (accent + bold).
         if key == self._active_path:
             label.stylize(Style(color=token(self.app, "hint-key"), bold=True))
         elif key in self._open_paths:
-            label.stylize(Style(color=token(self.app, "foreground")))
+            label.stylize(Style(color=token(self.app, "tab-active")))
         return label
 
 
@@ -79,19 +78,18 @@ class ProjectPanel(Vertical):
         width: 40;
         height: 100%;
         display: none;
-        /* Same chrome as the find/replace and spelling bars. */
         background: $boost;
-        border-right: solid $accent 30%;
+        /* A 3-sided box (top/right/bottom) that "flies out" from the screen
+           edge; Textual draws the ┐ ┘ corners. The project name rides the top. */
+        border-top: solid $accent 40%;
+        border-right: solid $accent 40%;
+        border-bottom: solid $accent 40%;
+        border-title-color: $text;
+        border-title-align: left;
     }
 
     ProjectPanel.visible {
         display: block;
-    }
-
-    ProjectPanel #project-rule {
-        color: $accent 30%;
-        margin: 0;
-        padding: 0;
     }
 
     ProjectPanel WriterTree {
@@ -134,14 +132,18 @@ class ProjectPanel(Vertical):
         self._root = root
 
     def compose(self) -> ComposeResult:
-        yield Rule(id="project-rule")
         yield WriterTree(str(self._root), id="project-tree")
 
     def on_mount(self) -> None:
+        self.border_title = self._title(self._root)
         try:
             self.query_one(WriterTree).show_root = False  # show contents, not root
         except Exception:
             pass
+
+    @staticmethod
+    def _title(root: Path) -> str:
+        return f" {root.name or root} "
 
     @property
     def is_open(self) -> bool:
@@ -167,6 +169,7 @@ class ProjectPanel(Vertical):
 
     def set_root(self, root: Path) -> None:
         self._root = root
+        self.border_title = self._title(root)
         try:
             tree = self.query_one(WriterTree)
             tree.path = str(root)
