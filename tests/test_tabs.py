@@ -8,10 +8,18 @@ from pathlib import Path
 from markstar.app import MarkStarApp, MarkStarTextArea
 from markstar.config import Preferences
 from markstar.ui.project_panel import ProjectPanel
+from markstar.ui.tab_bar import TabBar
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+class _Click:
+    """Minimal stand-in for a Click event — TabBar.on_click only reads .x."""
+
+    def __init__(self, x: int) -> None:
+        self.x = x
 
 
 def _two_tabs(tmp_path: Path):
@@ -20,21 +28,27 @@ def _two_tabs(tmp_path: Path):
     return tmp_path
 
 
+def _open_two(app, proj):
+    app.workspace.open_path(proj / "a.md")
+    app._load_active_into_editor()
+    app.workspace.open_path(proj / "b.md")
+    app._load_active_into_editor()
+    app._refresh_status()
+
+
 def test_click_tab_activates_it(tmp_path) -> None:
     proj = _two_tabs(tmp_path)
 
     async def go():
         app = MarkStarApp()
         async with app.run_test() as pilot:
-            app.workspace.open_path(proj / "a.md")
-            app._load_active_into_editor()
-            app.workspace.open_path(proj / "b.md")
-            app._load_active_into_editor()
-            app._refresh_status()
+            _open_two(app, proj)
             await pilot.pause()
             was = app.workspace.active_index
-            start = app._tab_bounds[0][0]
-            app.handle_tab_click(start + 2)  # body of tab 0
+            bar = app.query_one("#tab-label", TabBar)
+            start = bar._bounds[0][0]
+            assert bar.hit_test(start + 2) == ("activate", 0)
+            bar.on_click(_Click(start + 2))  # body of tab 0
             await pilot.pause()
             return was, app.workspace.active_index
 
@@ -48,20 +62,38 @@ def test_click_close_x_closes_tab(tmp_path) -> None:
     async def go():
         app = MarkStarApp()
         async with app.run_test() as pilot:
-            app.workspace.open_path(proj / "a.md")
-            app._load_active_into_editor()
-            app.workspace.open_path(proj / "b.md")
-            app._load_active_into_editor()
-            app._refresh_status()
+            _open_two(app, proj)
             await pilot.pause()
             before = app.workspace.count
-            close_col = app._tab_bounds[1][2]  # × of tab 1
-            app.handle_tab_click(close_col)
+            bar = app.query_one("#tab-label", TabBar)
+            close_col = bar._bounds[1][2]  # × of tab 1
+            assert bar.hit_test(close_col) == ("close", 1)
+            bar.on_click(_Click(close_col))
             await pilot.pause()
             return before, app.workspace.count
 
     before, after = _run(go())
     assert before == 2 and after == 1
+
+
+def test_click_outside_any_chip_is_a_noop(tmp_path) -> None:
+    proj = _two_tabs(tmp_path)
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            _open_two(app, proj)
+            await pilot.pause()
+            bar = app.query_one("#tab-label", TabBar)
+            far = bar._bounds[-1][1] + 50  # well past the last chip
+            assert bar.hit_test(far) is None
+            active = app.workspace.active_index
+            bar.on_click(_Click(far))
+            await pilot.pause()
+            return active, app.workspace.active_index, app.workspace.count
+
+    active, still, count = _run(go())
+    assert still == active and count == 2
 
 
 def test_prose_width_pref_applied_to_editor(tmp_path, monkeypatch) -> None:

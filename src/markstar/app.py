@@ -55,6 +55,7 @@ from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.editor_session import EditorSession
 from markstar.ui.layout import ProseLayout, compute_layout
+from markstar.ui.tab_bar import TabBar, TabInfo
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
@@ -89,13 +90,7 @@ _OSC_RESET_BG = "\x1b]111\x07"
 _DEFAULT_SUFFIX = ".md"
 _COMPILED_SUFFIX = ".compiled.md"
 
-# Tab-chip geometry — the chip renders as: "{lead}{name}{gap}×{tail}", i.e.
-#   _CHIP_LEAD spaces, the filename, _CHIP_GAP (" • " / "   "), the × close hit,
-#   then _CHIP_TAIL (" │"). Both the render string and the click hit-testing use
-# these so the close-× hot-spot can't drift from what's drawn.
-_CHIP_LEAD = 3   # "   " before the name
-_CHIP_GAP = 3    # " {dirty-marker} " between name and ×
-_CHIP_TAIL = 3   # "× │" region width after the name+gap (×, space, │)
+# Tab-chip geometry + rendering now live in ui/tab_bar.TabBar.
 
 
 class MarkStarTextArea(TextArea):
@@ -372,19 +367,6 @@ class MarkStarTextArea(TextArea):
         return line
 
 
-class _TabBar(Static):
-    """The tab ribbon. Clicking a tab activates it; clicking its × closes it.
-
-    Chip layout (plain): ``   {name} {•} × │`` — the app maps a click's column
-    to a tab (and to the × hot-spot) via bounds computed in _refresh_status.
-    """
-
-    def on_click(self, event: events.Click) -> None:
-        app = self.app
-        if hasattr(app, "handle_tab_click"):
-            app.handle_tab_click(event.x)  # type: ignore[attr-defined]
-
-
 class MarkStarApp(App[None]):
     """Writing shell with command registry, menus, and find/replace."""
 
@@ -605,8 +587,6 @@ class MarkStarApp(App[None]):
         )
         self.registry = CommandRegistry()
         self._last_find_end = 0
-        # (start, end, close_col, index) per tab chip — for click routing.
-        self._tab_bounds: list[tuple[int, int, int, int]] = []
         self._speller = Speller(
             self.prefs.spell_added, language=self.prefs.spell_language
         )
@@ -774,7 +754,7 @@ class MarkStarApp(App[None]):
             # blank · filename · blank · thin rule · (find) · editor
             with Vertical(id="tab-strip"):
                 yield Static("", id="tab-pad-top")
-                yield _TabBar("", id="tab-label")  # chips built in _refresh_status
+                yield TabBar("", id="tab-label")  # chips built in _refresh_status
                 # No blank row under the tab label — rule sits tight underneath
                 yield Static("", id="tab-rule")
             yield FindBar(id="find-bar")
@@ -1108,28 +1088,14 @@ class MarkStarApp(App[None]):
         and the │ separator both in the dim rule color. Click bounds recorded
         in ``self._tab_bounds`` = (start, end, close_col, index).
         """
-        dim = token(self, "rule")
-        chips: list[str] = []
-        bounds: list[tuple[int, int, int, int]] = []
-        cursor = 0
-        active_index = self.workspace.active_index
-        for i, doc in enumerate(self.workspace.documents):
-            name = doc.path.name if doc.path else "Untitled"
-            mid = "•" if doc.dirty else " "
-            nc = (
-                token(self, "tab-active")
-                if i == active_index
-                else token(self, "tab-inactive")
-            )
-            # Plain form: "   " + name + " " + mid + " " + "×" + " " + "│"
-            chips.append(f"[{nc}]   {name} {mid} [/][{dim}]×[/] [{dim}]│[/]")
-            width = _CHIP_LEAD + len(name) + _CHIP_GAP + _CHIP_TAIL
-            close_col = cursor + _CHIP_LEAD + len(name) + _CHIP_GAP
-            bounds.append((cursor, cursor + width, close_col, i))
-            cursor += width
-        self._tab_bounds = bounds
+        tabs = [
+            TabInfo(doc.path.name if doc.path else "Untitled", doc.dirty)
+            for doc in self.workspace.documents
+        ]
         try:
-            self.query_one("#tab-label", _TabBar).update("".join(chips))
+            self.query_one("#tab-label", TabBar).set_tabs(
+                tabs, self.workspace.active_index
+            )
         except Exception:
             pass
 
@@ -1161,20 +1127,16 @@ class MarkStarApp(App[None]):
         except Exception:
             pass
 
-    def handle_tab_click(self, x: int) -> None:
-        """Route a click in the tab ribbon: × closes that tab, else activates it."""
-        for start, end, close_col, idx in self._tab_bounds:
-            if start <= x < end:
-                if x == close_col:
-                    self._close_tab_index(idx)
-                elif idx != self.workspace.active_index:
-                    self._switch_tab(lambda i=idx: self.workspace.set_active(i))
-                return
+    @on(TabBar.Activated)
+    def _on_tab_activated(self, event: TabBar.Activated) -> None:
+        if event.index != self.workspace.active_index:
+            self._switch_tab(lambda i=event.index: self.workspace.set_active(i))
 
-    def _close_tab_index(self, idx: int) -> None:
+    @on(TabBar.Closed)
+    def _on_tab_closed(self, event: TabBar.Closed) -> None:
         self._sync_document_from_editor()
-        if idx != self.workspace.active_index:
-            self.workspace.set_active(idx)
+        if event.index != self.workspace.active_index:
+            self.workspace.set_active(event.index)
         self.cmd_close()
 
     def action_run_command(self, command_id: str) -> None:
