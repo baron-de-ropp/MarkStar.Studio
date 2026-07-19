@@ -12,7 +12,7 @@ from pathlib import Path
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
@@ -111,14 +111,44 @@ class WelcomeScreen(ModalScreen):
     }
     #welcome-hints {
         width: 100%;
-        content-align: center middle;
+        height: auto;
         color: $text-muted;
         padding: 2 0 0 0;
+    }
+    /* Wide: one centered line with all three hints. */
+    #hints-wide {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
+    }
+    /* Compact: two hints justified to the box edges, third centered underneath. */
+    #hints-row {
+        width: 100%;
+        height: auto;
+        display: none;
+    }
+    #hint-left {
+        width: 1fr;
+        text-align: left;
+        color: $text-muted;
+    }
+    #hint-right {
+        width: 1fr;
+        text-align: right;
+        color: $text-muted;
+    }
+    #hints-third {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
+        display: none;
     }
     #welcome-brand {
         dock: bottom;
         width: 100%;
-        content-align: center middle;
+        /* Per-line centering: name and "studio · version" each center on their
+           own line (content-align would left-align the shorter second line). */
+        text-align: center;
         color: $text-muted;
         padding: 0 0 0 0;
     }
@@ -143,7 +173,8 @@ class WelcomeScreen(ModalScreen):
             compact = self._should_compact()
         if compact:
             # One-line wordmark for narrow terminals — the block logo would wrap.
-            return f"[{mark}]MARK[/][{star}]STAR ★[/]"
+            # MARK + STAR keep the same two theme colors as the full block logo.
+            return f"[{mark}]MARK[/][{star}]STAR[/]"
         lines = [
             f"[{mark}]{m}[/][{star}]{s}[/]" for m, s in zip(_MARK, _STAR)
         ]
@@ -172,6 +203,16 @@ class WelcomeScreen(ModalScreen):
             )
         except Exception:
             pass
+        # Wide → single centered hint line; compact → justified row + centered third.
+        for wid, show in (
+            ("#hints-wide", not compact),
+            ("#hints-row", compact),
+            ("#hints-third", compact),
+        ):
+            try:
+                self.query_one(wid).display = show
+            except Exception:
+                pass
         try:
             brand = self.query_one("#welcome-brand", Static)
             year = datetime.now().year
@@ -213,13 +254,22 @@ class WelcomeScreen(ModalScreen):
             # separated by ordinary spaces so wrapping only happens *between*
             # hints, never splitting a key from its label ("Esc" | "skip").
             nb = " "
-            hints = [
-                (f"[{hk}]Enter[/]", "open folder"),
-                (f"[{hk}]Ctrl+N[/]", "new file"),
-                (f"[{hk}]Esc[/]", "skip"),
-            ]
-            groups = [f"{key}{nb}{label.replace(' ', nb)}" for key, label in hints]
-            yield Static("   ".join(groups), id="welcome-hints")
+            def grp(key: str, label: str) -> str:
+                return f"[{hk}]{key}[/]{nb}{label.replace(' ', nb)}"
+
+            g_open = grp("Enter", "open folder")
+            g_new = grp("Ctrl+N", "new file")
+            g_skip = grp("Esc", "skip")
+            with Vertical(id="welcome-hints"):
+                # Wide: all three on one centered line.
+                yield Static(
+                    f"{g_open}   {g_new}   {g_skip}", id="hints-wide", markup=True
+                )
+                # Compact: first two justified to the edges, third centered below.
+                with Horizontal(id="hints-row"):
+                    yield Static(g_open, id="hint-left", markup=True)
+                    yield Static(g_new, id="hint-right", markup=True)
+                yield Static(g_skip, id="hints-third", markup=True)
         yield Static("", id="welcome-brand")
 
     def on_mount(self) -> None:
