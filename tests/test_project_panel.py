@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 
 from markstar.app import MarkStarApp
-from markstar.ui.project_panel import ProjectPanel, WriterTree
+from markstar.ui.project_panel import ProjectPanel, WriterTree, is_openable
 
 
 def _run(coro):
@@ -87,3 +87,31 @@ def test_selecting_file_opens_it_in_tab(tmp_path) -> None:
     path, text = _run(go())
     assert path == proj / "chapter-02.md"
     assert text.startswith("# Two")
+
+
+def test_is_openable_only_markdown_and_text() -> None:
+    for name in ("a.md", "b.markdown", "c.mkd", "d.txt", "E.MD"):
+        assert is_openable(name), name
+    for name in ("cover.png", "doc.pdf", "script.py", "data.json", "noext"):
+        assert not is_openable(name), name
+
+
+def test_selecting_non_markdown_file_does_not_open_it(tmp_path) -> None:
+    proj = _make_project(tmp_path)
+
+    async def go():
+        app = MarkStarApp(path=proj)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            before = app.workspace.count
+            active_path = app.document.path
+            event = type(
+                "E", (), {"path": proj / "cover.png", "stop": lambda self: None}
+            )()
+            app._on_tree_file_selected(event)
+            await pilot.pause()
+            return before, app.workspace.count, active_path, app.document.path
+
+    before, after, was_active, still_active = _run(go())
+    assert before == after  # no new tab
+    assert was_active == still_active  # active document unchanged

@@ -18,6 +18,19 @@ from textual.widgets import DirectoryTree
 
 from markstar.ui.themes import token
 
+# Files MarkStar can open/edit as documents. Everything else (images, PDFs,
+# binaries, source files) still shows in the tree as a link/embed target, but is
+# rendered fainter and can't be opened in an editor tab.
+MARKDOWN_EXTS = frozenset(
+    {".md", ".markdown", ".mdown", ".mkd", ".mdx", ".mdtext", ".txt"}
+)
+
+
+def is_openable(path) -> bool:
+    """True if ``path`` is a Markdown/plain-text document MarkStar can edit."""
+    return Path(path).suffix.lower() in MARKDOWN_EXTS
+
+
 class WriterTree(DirectoryTree):
     """DirectoryTree for writers: directories + all files (so images, PDFs, and
     other link/embed targets are visible), hidden dot-entries omitted. Quiet
@@ -53,6 +66,7 @@ class WriterTree(DirectoryTree):
         label = super().render_label(node, base_style, style)
         # Returned label is "icon(2 chars) + name". Force the brightness tier,
         # overriding DirectoryTree's default bold/bright folder styling:
+        #   non-openable file      → faintest (can't be edited; link target only)
         #   folders + closed files → dim (clearly below the editor text)
         #   open file (in a tab)   → brighter name
         #   active file            → brighter name, and its bullet in the accent
@@ -63,6 +77,10 @@ class WriterTree(DirectoryTree):
                 key = str(Path(path).resolve())
             except Exception:
                 key = None
+        # A non-openable file (image/PDF/etc.) reads faintest and never bold.
+        if path is not None and not node.allow_expand and not is_openable(path):
+            label.stylize(Style(color=token(self.app, "rule"), bold=False))
+            return label
         bright = token(self.app, "tab-active")
         dim = token(self.app, "tab-inactive")
         if key is not None and key == self._active_path:

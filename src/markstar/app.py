@@ -56,7 +56,7 @@ from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
 from markstar.ui.find_bar import FindBar
 from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
-from markstar.ui.project_panel import ProjectPanel, WriterTree
+from markstar.ui.project_panel import ProjectPanel, WriterTree, is_openable
 from markstar.ui.spell_bar import SpellBar
 from markstar.ui.suggest_popup import SuggestPopup
 from markstar.ui.theme_picker import ThemePicker
@@ -1455,11 +1455,21 @@ class MarkStarApp(App[None]):
 
     @on(WriterTree.FileSelected)
     def _on_tree_file_selected(self, event: WriterTree.FileSelected) -> None:
-        """Open the chosen file in a tab (keep the panel open for browsing)."""
+        """Open the chosen file in a tab (keep the panel open for browsing).
+
+        Only Markdown/plain-text documents are openable; other files (images,
+        PDFs, binaries) are link/embed targets and are left in place."""
         event.stop()
+        path = Path(event.path)
+        if not is_openable(path):
+            self.notify(
+                f"{path.name} isn't a Markdown document — link to it instead",
+                severity="warning",
+            )
+            return
         self._sync_document_from_editor()
         try:
-            self.workspace.open_path(Path(event.path))
+            self.workspace.open_path(path)
         except OSError as exc:
             self.notify(f"Open failed: {exc}", severity="error")
             return
@@ -1467,8 +1477,8 @@ class MarkStarApp(App[None]):
         self._load_active_into_editor()
         self._refresh_status()
         self.query_one("#editor", TextArea).focus()
-        self.notify(f"Opened {Path(event.path).name}")
-        self.run_worker(self._maybe_restore(Path(event.path)))
+        self.notify(f"Opened {path.name}")
+        self.run_worker(self._maybe_restore(path))
 
     def cmd_close(self) -> None:
         self._sync_document_from_editor()
