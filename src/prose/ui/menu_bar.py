@@ -187,6 +187,8 @@ class MenuBar(Vertical):
                     cmd.binding.replace("ctrl+", "Ctrl+")
                     .replace("shift+", "Shift+")
                     .replace("alt+", "Alt+")
+                    .replace("pagedown", "PgDn")
+                    .replace("pageup", "PgUp")
                     .replace("full_stop", ".")
                     .replace("comma", ",")
                 )

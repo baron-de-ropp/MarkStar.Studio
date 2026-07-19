@@ -50,7 +50,7 @@ This document is the source of truth for building Prose v0.1. Changes that affec
 
 1. Open any Markdown file and write comfortably with soft wrap.
 2. Hybrid Markdown display (styled off caret line; markers on focused line).
-3. Classic WP menus (Alt) + predictable Ctrl bindings.
+3. Classic WP menus (Esc/F9) + predictable Ctrl / Ctrl+Shift bindings (no Alt).
 4. Multi-file tabs + optional project folder tree.
 5. Safe autosave sidecars; full-session undo/redo.
 6. Compile `![[include]]` into one Markdown file.
@@ -261,15 +261,15 @@ prose/
 - **Ctrl+F** / **Ctrl+R** → bar at **top of prose frame** (VS Code–like).
 - **Enter** in find field → next match; **Enter** in replace field → replace one.
 - **Ctrl+Enter** → previous (when the terminal reports the chord).
-- **Ctrl+Alt+R** → replace all (same bulk pattern as Save All / Close All).
+- **Ctrl+Shift+Enter** → replace all (primary; Ctrl+Shift+R secondary — hosts often steal that chord).
 - Esc dismisses.
 - Footer does not morph into find.
 
 ### 5.7 Menus
 
-- **Not always visible.** Summon: **Alt** or **Alt+letter** (e.g. Alt+F → File open).
-- **Esc** dismisses / backs up.
-- **F10** optional alias for menu bar.
+- **Not always visible.** Summon: **Esc** (primary) or **F9** (not Alt — terminals steal Alt).
+- **Esc** dismisses / backs up when menu is open; also dismisses find first when find is open.
+- **F9** optional alias for menu bar.
 - Thin top bar when summoned; **OpenCode-styled dropdowns** (soft panel, accent on row, dim shortcuts).
 - Menu = catalog of **commands + keybindings**; arrow + Enter runs command; bindings always work without menu.
 
@@ -285,7 +285,7 @@ prose/
 | Zone | Content |
 |------|---------|
 | Left | Spellcheck indicator |
-| Center (dim) | Few classic hints (`^S save  ^B bold  ^F find  Alt menu`) |
+| Center (dim) | Few classic hints (`^S save  ^F find  Esc menu`) |
 | Right | **Word count** · **L:C** · **dialect** (e.g. CommonMark) |
 
 ### 5.10 Zen mode
@@ -311,10 +311,10 @@ Top-level bar:
 | Open File… | Ctrl+O |
 | Open Project Folder… | Ctrl+Shift+O |
 | Close | Ctrl+W |
-| Close All | Ctrl+Alt+W |
+| Close All | (menu only — hosts steal common close-all chords) |
 | Save | Ctrl+S |
 | Save As… | Ctrl+Shift+S |
-| Save All | Ctrl+Alt+S |
+| Save All | Ctrl+Shift+A |
 | Close Project Folder | (menu) |
 | Recent files | submenu |
 | Exit | Ctrl+Q |
@@ -330,9 +330,9 @@ Top-level bar:
 | Find… | Ctrl+F |
 | Replace… | Ctrl+R |
 | Find Next / Previous | Enter / Ctrl+Enter (in Find) |
-| Replace one / all | Enter (replace field) / Ctrl+Alt+R |
-| Expand / Shrink selection | Shift+Alt+→ / ← |
-| Move line up / down | Alt+↑ / ↓ |
+| Replace one / all | Enter (replace field) / Ctrl+Shift+Enter |
+| Expand / Shrink selection | (TBD — no Alt; pick Ctrl+Shift chord when implementing) |
+| Move line up / down | Ctrl+Shift+↑ / ↓ |
 | Duplicate line | Ctrl+Shift+D |
 | Delete word backward / forward | Ctrl+Backspace / Ctrl+Delete |
 
@@ -343,7 +343,7 @@ Top-level bar:
 | Toggle Project Panel | Ctrl+Shift+E |
 | Next / Previous Tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Zen mode | F11 |
-| Soft wrap | Alt+Z |
+| Soft wrap | Ctrl+Shift+L |
 | Show Markdown markers | (menu / pref) |
 | Show typography marks | (menu / pref) |
 | Current line highlight | (menu / pref) |
@@ -412,11 +412,12 @@ Later: Check for Updates; ProseAI.
 | Modifier | Meaning |
 |----------|---------|
 | **Ctrl+Key** | Micro / this buffer |
-| **Ctrl+Shift+Key** | Variant: other file, As…, broader scope |
-| **Ctrl+Alt+Key** | All open tabs / session-wide (where appropriate) |
-| **Forbidden** | Multi-step chords (no Ctrl+K then S) |
+| **Ctrl+Shift+Key** | Stronger variant, multi-tab, or bulk (Save As, Save All, Replace All, move line, …) |
+| **Menu only** | Rare / host-stolen actions (Close Others, Close All) |
+| **Esc / F9** | Summon classic menus (never Alt) |
+| **Forbidden** | Multi-step chords (no Ctrl+K then S); **Alt / Ctrl+Alt** as required product chords (terminals strip or steal Meta) |
 
-All bindings overridable in Preferences / config. Desktop may steal Ctrl+Alt combos — remap as needed.
+All bindings overridable in Preferences / config. Verify every new chord in the target terminal before documenting it as default.
 
 ### 7.1 Creature comfort motion
 
@@ -593,7 +594,7 @@ A user can:
 
 1. Install/run `prose` on Linux.  
 2. Open/create Markdown, type with soft wrap and hybrid bold/italic.  
-3. Use Alt menus and Ctrl bindings without a mouse.  
+3. Use Esc/F9 menus and Ctrl / Ctrl+Shift bindings without a mouse.  
 4. Undo/redo deeply; Save clears autosave sidecar.  
 5. Open a project folder, browse tree (md emphasized), multi-tab edit.  
 6. Find/replace; word and paragraph hop; expand selection; move/duplicate line.  
@@ -609,6 +610,7 @@ A user can:
 | Date | Change |
 |------|--------|
 | 2026-07-17 | Initial freeze from design grilling session |
+| 2026-07-18 | Drop Alt/Ctrl+Alt required chords; rebind bulk/move/wrap to Ctrl+Shift; Esc/F9 menus |
 
 ---
 

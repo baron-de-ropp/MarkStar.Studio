@@ -9,16 +9,18 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Input, Static
 
-from prose.ui.keys import is_replace_all_key, normalize_key
+from prose.ui.keys import normalize_key
+from prose.ui.themes import token
 
 
 class FindInput(Input):
-    """Find/replace field with keys chosen for terminal reliability.
+    """Find/replace field. Key commands (all single-stroke, terminal-safe):
 
-    - Enter in the *find* field → next match
-    - Enter in the *replace* field → replace one
-    - Ctrl+Enter → previous match (needs a terminal that reports the chord)
-    - Ctrl+R → expand to replace (handled on FindBar / App)
+    - Enter (find field) → next match ·  Enter (replace field) → replace one
+    - ↓ → next match ·  ↑ → previous match
+    - Ctrl+L → Replace All  (only in replace mode; "L" = aLL — Ctrl+A is
+      Select All everywhere, far too dangerous to repurpose)
+    - Ctrl+R → expand find into replace
     """
 
     async def _on_key(self, event: events.Key) -> None:
@@ -29,6 +31,13 @@ class FindInput(Input):
 
         key = normalize_key(event.key)
 
+        # Ctrl+L = Replace All (deliberately NOT Ctrl+A, which is Select All).
+        if key == "ctrl+l" and bar.is_replace_mode:
+            event.prevent_default()
+            event.stop()
+            bar.post_message(FindBar.ReplaceRequested("all"))
+            return
+
         if key in {"enter", "return"}:
             event.prevent_default()
             event.stop()
@@ -38,26 +47,23 @@ class FindInput(Input):
                 bar.post_message(FindBar.Submitted("next"))
             return
 
-        if key in {"ctrl+enter"}:
+        # Arrow keys cycle matches — a single-line Input ignores up/down anyway.
+        if key == "down":
+            event.prevent_default()
+            event.stop()
+            bar.post_message(FindBar.Submitted("next"))
+            return
+
+        if key == "up":
             event.prevent_default()
             event.stop()
             bar.post_message(FindBar.Submitted("prev"))
             return
 
-        if key in {"ctrl+r", "ctrl+h"}:
-            # ctrl+h only when the terminal reports it as ctrl+h (not Backspace).
+        if key == "ctrl+r":
             event.prevent_default()
             event.stop()
             bar.expand_replace()
-            return
-
-        if is_replace_all_key(key):
-            event.prevent_default()
-            event.stop()
-            # Always request replace-all; app ensures bar/query state.
-            if not bar.is_replace_mode:
-                bar.expand_replace()
-            bar.post_message(FindBar.ReplaceRequested("all"))
             return
 
         await super()._on_key(event)
@@ -75,9 +81,8 @@ class FindBar(Vertical):
     """Top-of-prose-frame find UI.
 
     Ctrl+F opens find; Ctrl+R opens/expands replace.
-    Enter = next (find field) or replace one (replace field).
-    Ctrl+Enter = previous when the terminal delivers it.
-    Ctrl+Alt+R = replace all (bulk / whole-document chord).
+    Enter / ↓ = next · ↑ = previous · Enter (replace field) = replace one ·
+    Ctrl+L = Replace All. (Replace All also lives in the Edit menu.)
     """
 
     DEFAULT_CSS = """
@@ -150,14 +155,7 @@ class FindBar(Vertical):
     BINDINGS = [
         Binding("escape", "dismiss", "Close", show=False, priority=True),
         Binding("enter", "submit_enter", "Next / Replace", show=False, priority=True),
-        Binding("ctrl+enter", "find_prev", "Previous", show=False, priority=True),
         Binding("ctrl+r", "expand_replace", "Replace mode", show=False, priority=True),
-        # Only fires when the terminal sends a real ctrl+h (not ASCII BS).
-        Binding("ctrl+h", "expand_replace", "Replace mode", show=False, priority=True),
-        Binding("ctrl+alt+r", "replace_all", "Replace all", show=False, priority=True),
-        Binding("alt+ctrl+r", "replace_all", "Replace all", show=False, priority=True),
-        Binding("ctrl+alt+R", "replace_all", "Replace all", show=False, priority=True),
-        Binding("alt+ctrl+R", "replace_all", "Replace all", show=False, priority=True),
     ]
 
     class Submitted(Message):
@@ -285,16 +283,8 @@ class FindBar(Vertical):
         else:
             self.post_message(self.Submitted("next"))
 
-    def action_find_prev(self) -> None:
-        self.post_message(self.Submitted("prev"))
-
     def action_expand_replace(self) -> None:
         self.expand_replace()
-
-    def action_replace_all(self) -> None:
-        if not self._show_replace:
-            self.expand_replace()
-        self.post_message(self.ReplaceRequested("all"))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Fallback if Enter slips through as Input.Submitted."""
@@ -313,20 +303,24 @@ class FindBar(Vertical):
         row.display = self._show_replace
 
     def _refresh_hints(self) -> None:
+        # Footer-style: [blue]KEY[/] Action, joined by "  |  ".
+        # Both modes share the same shape: Enter · ↑↓ · one Ctrl command · Esc.
         if self._show_replace:
-            text = (
-                "[#007ACC]Enter[/] replace/next  "
-                "[#007ACC]Ctrl+Enter[/] prev  "
-                "[#007ACC]Ctrl+Alt+R[/] all  "
-                "[#007ACC]Esc[/] close"
-            )
+            parts = [
+                ("Enter", "Replace & Next"),
+                ("↑↓", "Prev/Next"),
+                ("Ctrl+L", "Replace All"),
+                ("Esc", "Close"),
+            ]
         else:
-            text = (
-                "[#007ACC]Enter[/] next  "
-                "[#007ACC]Ctrl+Enter[/] prev  "
-                "[#007ACC]Ctrl+R[/] replace  "
-                "[#007ACC]Esc[/] close"
-            )
+            parts = [
+                ("Enter", "Next"),
+                ("↑↓", "Prev/Next"),
+                ("Ctrl+R", "Replace"),
+                ("Esc", "Close"),
+            ]
+        hk = token(self.app, "hint-key", "#007ACC")
+        text = "  |  ".join(f"[{hk}]{key}[/] {desc}" for key, desc in parts)
         try:
             self.query_one("#find-hints", Static).update(text)
         except Exception:

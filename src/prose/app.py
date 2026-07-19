@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -32,49 +33,93 @@ from prose.domain.search import (
 )
 from prose.domain.workspace import Workspace
 from prose.ui.find_bar import FindBar
-from prose.ui.keys import is_replace_all_key, normalize_key
+from prose.ui.keys import normalize_key
 from prose.ui.menu_bar import MenuBar
-from prose.ui.themes import DEFAULT_THEME_NAME, VSCODE_DARK
-
-# Soft highlight for non-focused find hits (VS Code–ish findMatchBackground).
-# Focused hit stays bright via TextArea selection_style (#264f78).
-_SEARCH_MATCH_STYLE = Style(bgcolor="#515C6A")
-
-# Keys that mean "next/prev tab" depending on how the terminal encodes Ctrl+Shift+,/.
-_NEXT_TAB_KEYS = frozenset(
-    {
-        "ctrl+shift+.",
-        "ctrl+shift+full_stop",
-        "ctrl+shift+period",
-        "ctrl+shift+greater_than",
-        "ctrl+greater_than",
-        "ctrl+shift+right_angle_bracket",
-    }
+from prose.ui.themes import (
+    DEFAULT_THEME_NAME,
+    MARKSTAR_LIGHT,
+    THEME_NAMES,
+    VSCODE_DARK,
+    token,
 )
-_PREV_TAB_KEYS = frozenset(
-    {
-        "ctrl+shift+,",
-        "ctrl+shift+comma",
-        "ctrl+shift+less_than",
-        "ctrl+less_than",
-        "ctrl+shift+left_angle_bracket",
-    }
-)
+
+# Inline Markdown patterns (approach #1: style spans, never hide characters, so
+# there is no source↔screen offset mapping — see docs/MARKSTAR_KEYMAP.md §5b).
+_RE_HEADING = re.compile(r"^(#{1,6}\s+)(.*)$")
+_RE_QUOTE = re.compile(r"^(\s*>\s?)(.*)$")
+# List marker at line start: -, +, * (bullet) or "1." (ordered), then a space.
+# The trailing space distinguishes "* item" (bullet) from "*italic*".
+_RE_LIST = re.compile(r"^(\s*(?:[-+*]|\d+\.)\s+)")
+# [text](url) — dim the brackets/url, color the link text.
+_RE_LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
+_RE_CODE = re.compile(r"`([^`\n]+)`")
+_RE_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
+_RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)")
+_RE_STRIKE = re.compile(r"~~([^~\n]+)~~")
+# A fenced-code delimiter line: ``` or ~~~ (3+), optionally indented, with an
+# optional info string (language) after it. Fences span multiple lines, so they
+# are tracked separately (see ProseTextArea._recompute_fences).
+_RE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+
+
+def _markdown_spans(line: str) -> list[tuple[int, int, str]]:
+    """Return (start, end, style-key) spans for inline Markdown on one line.
+
+    Markers (``**``, ``*``, `` ` ``, ``~~``, ``#``, ``>``) get the ``marker``
+    key so they render dimmed; the wrapped content gets its semantic key.
+    Characters are never removed, so columns map 1:1 to the document.
+    (Fenced code blocks are handled per-line in get_line, not here.)
+    """
+    spans: list[tuple[int, int, str]] = []
+    heading = _RE_HEADING.match(line)
+    if heading:
+        marker_end = len(heading.group(1))
+        spans.append((0, marker_end, "marker"))
+        spans.append((marker_end, len(line), "heading"))
+        return spans
+    quote = _RE_QUOTE.match(line)
+    if quote:
+        marker_end = len(quote.group(1))
+        spans.append((0, marker_end, "marker"))
+        spans.append((marker_end, len(line), "quote"))
+        return spans
+    # List marker (bullet/ordered): dim just the marker, then keep going so
+    # inline formatting inside the item still renders.
+    lst = _RE_LIST.match(line)
+    if lst:
+        spans.append((0, len(lst.group(1)), "marker"))
+    # Links: [text](url) — color the text, dim the [] () and the url.
+    for m in _RE_LINK.finditer(line):
+        text_start = m.start() + 1
+        text_end = text_start + len(m.group(1))
+        spans.append((m.start(), text_start, "marker"))  # [
+        spans.append((text_start, text_end, "link"))     # text
+        spans.append((text_end, m.end(), "marker"))      # ](url)
+    for rx, mlen, kind in (
+        (_RE_CODE, 1, "code"),
+        (_RE_BOLD, 2, "strong"),
+        (_RE_ITALIC, 1, "emphasis"),
+        (_RE_STRIKE, 2, "strike"),
+    ):
+        for m in rx.finditer(line):
+            spans.append((m.start(), m.start() + mlen, "marker"))
+            spans.append((m.start() + mlen, m.end() - mlen, kind))
+            spans.append((m.end() - mlen, m.end(), "marker"))
+    return spans
 
 
 class ProseTextArea(TextArea):
-    """TextArea that never inserts when a tab-switch chord is pressed.
+    """Prose editing surface.
 
-    Some terminals deliver Ctrl+Shift+. as a printable '>' unless we intercept
-    before TextArea's insert path.
-
-    Also narrows the soft-wrap width so text keeps a 5-column right margin while
+    Narrows the soft-wrap width so text keeps a 5-column right margin while
     the widget itself (and its scrollbar) runs flush to the window edge. Right
     padding can't do this: Textual carves the scrollbar out of the region left
     over AFTER padding, so padding-right insets the scrollbar as well.
 
-    Search highlights: all matches get a soft background via ``get_line``;
-    the focused match is the normal selection (brighter), painted on top.
+    Rendering: ``get_line`` paints (a) inline Markdown formatting — bold/italic/
+    code/headings styled in place with markers dimmed — and (b) search-match
+    backgrounds. Both use theme color tokens (see ``prose.ui.themes``), so a
+    theme change repaints them. Toggle formatting with ``render_markdown``.
     """
 
     # Base wrap_width already reserves the scrollbar column (via
@@ -87,11 +132,89 @@ class ProseTextArea(TextArea):
         super().__init__(*args, **kwargs)
         # line_index -> list of (start_col, end_col) character offsets on that line
         self._search_by_line: dict[int, list[tuple[int, int]]] = {}
+        self.render_markdown = True
+        self._styles: dict[str, Style] = {}
+        self._style_key: str | None = None  # theme name the cache was built for
+        # line_index -> "fence" (a ``` delimiter line) | "code" (line inside a fence)
+        self._fence_lines: dict[int, str] = {}
 
     @property
     def wrap_width(self) -> int:
         width = super().wrap_width
         return max(0, width - self.EXTRA_RIGHT_MARGIN) if width else width
+
+    def _theme_styles(self) -> dict[str, Style]:
+        """Rich styles for each span kind, resolved from the current theme."""
+        name = getattr(self.app, "theme", None)
+        if name == self._style_key and self._styles:
+            return self._styles
+        marker = token(self.app, "md-marker", "#6A6A6A")
+        self._styles = {
+            "marker": Style(color=marker),
+            "strong": Style(color=token(self.app, "md-strong", "#E6E6E6"), bold=True),
+            "emphasis": Style(color=token(self.app, "md-emphasis", "#D4D4D4"), italic=True),
+            "code": Style(color=token(self.app, "md-code", "#CE9178")),
+            "strike": Style(color=marker, strike=True),
+            "heading": Style(color=token(self.app, "md-heading", "#569CD6"), bold=True),
+            "quote": Style(color=token(self.app, "md-quote", "#7BA88B"), italic=True),
+            "link": Style(color=token(self.app, "md-link", "#4E9CD6"), underline=True),
+            "search": Style(bgcolor=token(self.app, "search-match", "#515C6A")),
+        }
+        self._style_key = name
+        return self._styles
+
+    def recompute_fences(self) -> None:
+        """Map each line to fenced-code state. Call after any text change.
+
+        Fenced blocks span multiple lines, so per-line ``get_line`` can't detect
+        them alone — we scan the whole document and toggle in/out on ``` lines.
+        """
+        fences: dict[int, str] = {}
+        in_fence = False
+        for i, line in enumerate(self.text.split("\n")):
+            if _RE_FENCE.match(line):
+                fences[i] = "fence"
+                in_fence = not in_fence
+            elif in_fence:
+                fences[i] = "code"
+        if fences != self._fence_lines:
+            self._fence_lines = fences
+            self._line_cache.clear()
+            self.refresh()
+
+    def load_text(self, text: str) -> None:  # type: ignore[override]
+        super().load_text(text)
+        self.recompute_fences()
+
+    def set_render_markdown(self, on: bool) -> None:
+        self.render_markdown = on
+        self._line_cache.clear()
+        self.refresh()
+
+    def refresh_theme_styles(self) -> None:
+        """Drop the style cache so the next paint picks up a new theme."""
+        self._style_key = None
+        self._line_cache.clear()
+        self.refresh()
+
+    def _location_over_link(self, event: events.MouseMove) -> bool:
+        """True if the mouse is over a ``[text](url)`` span."""
+        try:
+            row, col = self.get_target_document_location(event)
+            line = self.document.get_line(row)
+        except Exception:
+            return False
+        return any(m.start() <= col < m.end() for m in _RE_LINK.finditer(line))
+
+    async def _on_mouse_move(self, event: events.MouseMove) -> None:
+        await super()._on_mouse_move(event)
+        # Hand pointer over links, typewriter caret over the rest of the text.
+        want = "pointer" if (self.render_markdown and self._location_over_link(event)) else "text"
+        try:
+            if self.styles.pointer != want:
+                self.styles.pointer = want
+        except Exception:
+            pass
 
     def set_search_highlights(self, matches: list[Match]) -> None:
         """Soft-highlight every match. Pass ``[]`` to clear."""
@@ -134,27 +257,36 @@ class ProseTextArea(TextArea):
 
     def get_line(self, line_index: int) -> Text:
         line = super().get_line(line_index)
-        spans = self._search_by_line.get(line_index)
-        if spans:
-            for start_col, end_col in spans:
-                if start_col < end_col:
-                    line.stylize(_SEARCH_MATCH_STYLE, start_col, end_col)
-        return line
+        styles: dict[str, Style] | None = None
 
-    async def _on_key(self, event: events.Key) -> None:
-        key = event.key
-        # Also match bare angle brackets if modifiers are encoded only in key name
-        if key in _NEXT_TAB_KEYS or key in {"ctrl+shift+>"}:
-            event.stop()
-            event.prevent_default()
-            self.app.cmd_next_tab()
-            return
-        if key in _PREV_TAB_KEYS or key in {"ctrl+shift+<"}:
-            event.stop()
-            event.prevent_default()
-            self.app.cmd_prev_tab()
-            return
-        await super()._on_key(event)
+        if self.render_markdown:
+            text = line.plain
+            fence_kind = self._fence_lines.get(line_index)
+            if fence_kind == "fence":
+                # The ``` delimiter line itself — dim it like a marker.
+                styles = self._theme_styles()
+                line.stylize(styles["marker"], 0, len(text))
+            elif fence_kind == "code":
+                # A content line inside a fenced block — whole line as code.
+                styles = self._theme_styles()
+                line.stylize(styles["code"], 0, len(text))
+            else:
+                md_spans = _markdown_spans(text)
+                if md_spans:
+                    styles = self._theme_styles()
+                    length = len(text)
+                    for start, end, kind in md_spans:
+                        if 0 <= start < end <= length:
+                            line.stylize(styles[kind], start, end)
+
+        search = self._search_by_line.get(line_index)
+        if search:
+            if styles is None:
+                styles = self._theme_styles()
+            for start_col, end_col in search:
+                if start_col < end_col:
+                    line.stylize(styles["search"], start_col, end_col)
+        return line
 
 
 class ProseApp(App[None]):
@@ -168,6 +300,12 @@ class ProseApp(App[None]):
     Screen {
         layout: vertical;
         background: $background;
+    }
+
+    /* Text-entry areas get the I-beam / typewriter mouse pointer (OSC 22;
+       honored by terminals that support pointer shapes, ignored otherwise). */
+    Input {
+        pointer: text;
     }
 
     /* Top-line menu ribbon (first terminal row when open). */
@@ -241,6 +379,9 @@ class ProseApp(App[None]):
         /* No padding at all — left inset is the gutter widget, right inset lives in
            ProseTextArea.wrap_width so the scrollbar stays flush at the window edge. */
         padding: 0;
+        /* Typewriter caret over the writing surface; the mouse-move handler flips
+           this to a hand when hovering a Markdown link. */
+        pointer: text;
         background: $background;
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
@@ -321,8 +462,11 @@ class ProseApp(App[None]):
     _PROSE_MARGIN_LEFT = 5
     _PROSE_MAX_WIDTH = 120
 
-    # Menu: Esc is primary (Word/MC-style). F9 remains as alternate.
+    # Menu: Esc is primary (Word/Works-style). F9 is the alternate.
     # Esc also dismisses find/modals when those are open (see action_esc_key).
+    # Everything else is bound from the command registry in on_mount(); only the
+    # menu keys and cursor motion (which must beat TextArea's own bindings) live
+    # here. See docs/MARKSTAR_KEYMAP.md — no Ctrl+Shift, no chords, all portable.
     BINDINGS = [
         Binding(
             "escape",
@@ -340,53 +484,20 @@ class ProseApp(App[None]):
             priority=True,
             key_display="F9",
         ),
-        Binding(
-            "ctrl+shift+p",
-            "show_menu",
-            "Menu",
-            show=False,
-            priority=True,
-            key_display="Ctrl+Shift+P",
-        ),
-        # Tab switching (Ctrl+Shift = across open files; ,/. keys ≈ < > direction).
-        # With Shift held, terminals often report greater_than/less_than — not full_stop/comma.
-        Binding("ctrl+shift+full_stop", "next_tab", "Next tab", show=False, priority=True),
-        Binding("ctrl+shift+greater_than", "next_tab", "Next tab", show=False, priority=True),
-        Binding("ctrl+shift+period", "next_tab", "Next tab", show=False, priority=True),
-        Binding("ctrl+greater_than", "next_tab", "Next tab", show=False, priority=True),
-        Binding("ctrl+shift+comma", "prev_tab", "Prev tab", show=False, priority=True),
-        Binding("ctrl+shift+less_than", "prev_tab", "Prev tab", show=False, priority=True),
-        Binding("ctrl+less_than", "prev_tab", "Prev tab", show=False, priority=True),
         Binding("ctrl+right", "word_right", "Word right", show=False, priority=True),
         Binding("ctrl+left", "word_left", "Word left", show=False, priority=True),
         Binding("ctrl+up", "paragraph_up", "Paragraph up", show=False, priority=True),
         Binding("ctrl+down", "paragraph_down", "Paragraph down", show=False, priority=True),
-        Binding("alt+up", "move_line_up", "Move line up", show=False, priority=True),
-        Binding("alt+down", "move_line_down", "Move line down", show=False, priority=True),
-        Binding("ctrl+shift+d", "duplicate_line", "Duplicate line", show=False, priority=True),
-        # Find / replace (bindings chosen with the user; bulk = Ctrl+Alt).
-        Binding("ctrl+r", "show_replace", "Replace", show=False, priority=True),
-        # ctrl+h: only when distinct from Backspace (Kitty keyboard protocol).
-        Binding("ctrl+h", "show_replace", "Replace", show=False, priority=True),
-        Binding("ctrl+enter", "find_prev", "Find previous", show=False, priority=True),
-        Binding("ctrl+alt+r", "replace_all_key", "Replace all", show=False, priority=True),
-        Binding("alt+ctrl+r", "replace_all_key", "Replace all", show=False, priority=True),
-        Binding("ctrl+alt+R", "replace_all_key", "Replace all", show=False, priority=True),
-        Binding("alt+ctrl+R", "replace_all_key", "Replace all", show=False, priority=True),
-        # Bulk file ops — bind both modifier orders + letter cases.
-        Binding("ctrl+alt+s", "save_all", "Save all", show=False, priority=True),
-        Binding("alt+ctrl+s", "save_all", "Save all", show=False, priority=True),
-        Binding("ctrl+alt+S", "save_all", "Save all", show=False, priority=True),
-        Binding("alt+ctrl+S", "save_all", "Save all", show=False, priority=True),
-        Binding("ctrl+shift+s", "save_as", "Save as", show=False, priority=True),
-        Binding("ctrl+shift+S", "save_as", "Save as", show=False, priority=True),
-        Binding("ctrl+o", "open_file", "Open", show=False, priority=True),
-        Binding("ctrl+O", "open_file", "Open", show=False, priority=True),
+        # Ctrl+C is COPY, never quit. This overrides Textual's app-level
+        # "help_quit" binding (which pops a "Do you want to quit?" toast when
+        # focus isn't on a text widget). Quit lives on Ctrl+Q alone.
+        Binding("ctrl+c", "smart_copy", "Copy", show=False, priority=True),
     ]
 
     def __init__(self, path: Path | None = None) -> None:
         super().__init__()
         self.register_theme(VSCODE_DARK)
+        self.register_theme(MARKSTAR_LIGHT)
         self.theme = DEFAULT_THEME_NAME
         self._path_arg = path
         self.workspace = Workspace()
@@ -421,18 +532,19 @@ class ProseApp(App[None]):
                 )
             )
 
+        # File — all single-key or menu-only. Save As / Save All are menu-only
+        # (no portable single key worth spending; they're infrequent).
         add("new_file", "New File", "File", self.cmd_new_file, "ctrl+n")
         add("open_file", "Open File…", "File", self.cmd_open_file, "ctrl+o")
         add("close", "Close", "File", self.cmd_close, "ctrl+w")
         add("close_others", "Close Others", "File", self.cmd_close_others)  # menu only
         add("close_all", "Close All", "File", self.cmd_close_all)  # menu only
         add("save", "Save", "File", self.cmd_save, "ctrl+s")
-        add("save_as", "Save As…", "File", self.cmd_save_as, "ctrl+shift+s")
-        add("save_all", "Save All", "File", self.cmd_save_all, "ctrl+alt+s")
+        add("save_as", "Save As…", "File", self.cmd_save_as)  # menu only
+        add("save_all", "Save All", "File", self.cmd_save_all)  # menu only
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
-        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+shift+full_stop")
-        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+shift+comma")
 
+        # Edit
         add(
             "undo",
             "Undo",
@@ -446,18 +558,41 @@ class ProseApp(App[None]):
             "Redo",
             "Edit",
             self.cmd_redo,
-            "ctrl+shift+z",
+            "ctrl+y",  # single key (Ctrl+Shift+Z is not portable)
             enabled=lambda: self.document.can_redo,
         )
         add("find", "Find…", "Edit", self.cmd_find, "ctrl+f")
         add("replace", "Replace…", "Edit", self.cmd_replace, "ctrl+r")
-        add("find_next", "Find Next", "Edit", self.cmd_find_next)  # Enter in find bar
-        add("find_prev", "Find Previous", "Edit", self.cmd_find_prev, "ctrl+enter")
+        add("find_next", "Find Next", "Edit", self.cmd_find_next)  # Enter / ↓ in find bar
+        add("find_prev", "Find Previous", "Edit", self.cmd_find_prev)  # ↑ in find bar
         add("replace_one", "Replace", "Edit", self.cmd_replace_one)  # Enter in replace field
-        add("replace_all", "Replace All", "Edit", self.cmd_replace_all, "ctrl+alt+r")
+        add("replace_all", "Replace All", "Edit", self.cmd_replace_all)  # menu + bar buttons
         add("select_all", "Select All", "Edit", self.cmd_select_all, "ctrl+a")
+        add("duplicate_line", "Duplicate Line", "Edit", self.action_duplicate_line)  # menu
+        add("move_line_up", "Move Line Up", "Edit", self.action_move_line_up)  # menu
+        add("move_line_down", "Move Line Down", "Edit", self.action_move_line_down)  # menu
 
-        add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap, "alt+z")
+        # Format — inserts/wraps Markdown. Bold + Italic get single keys
+        # (Ctrl+I is impossible — it's Tab — so italic is Ctrl+E "emphasis").
+        add("fmt_bold", "Bold", "Format", self.cmd_bold, "ctrl+b")
+        add("fmt_italic", "Italic", "Format", self.cmd_italic, "ctrl+e")
+        add("fmt_strike", "Strikethrough", "Format", self.cmd_strikethrough)
+        add("fmt_code", "Inline Code", "Format", self.cmd_inline_code)
+        add("fmt_link", "Link", "Format", self.cmd_link)
+        add("fmt_heading", "Heading", "Format", self.cmd_heading)
+        add("fmt_quote", "Blockquote", "Format", self.cmd_blockquote)
+        add("fmt_bullet", "Bullet List", "Format", self.cmd_bullet_list)
+        add("fmt_number", "Numbered List", "Format", self.cmd_numbered_list)
+        add("fmt_rule", "Horizontal Rule", "Format", self.cmd_hrule)
+        add("fmt_fence", "Code Fence", "Format", self.cmd_code_fence)
+
+        # View
+        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+pagedown")
+        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
+        add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
+        add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
+        add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
+        add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
 
         add("about", "About…", "Help", self.cmd_about)
         add(
@@ -494,9 +629,9 @@ class ProseApp(App[None]):
     # Support-strip shortcuts (key label shown in blue, description dim).
     _SUPPORT_HINTS: list[tuple[str, str]] = [
         ("Esc", "Menu"),
-        ("Ctrl+Shift+.", "Next tab"),  # full_stop key; , is previous
         ("Ctrl+S", "Save"),
         ("Ctrl+F", "Find"),
+        ("Ctrl+B", "Bold"),
         ("Ctrl+Z", "Undo"),
         ("Ctrl+Q", "Quit"),
     ]
@@ -567,6 +702,9 @@ class ProseApp(App[None]):
             return
         self.document.set_text(new_text)
         self._refresh_status()
+        # Fenced code blocks are multi-line — recompute which lines are in a fence.
+        if isinstance(event.text_area, ProseTextArea):
+            event.text_area.recompute_fences()
         # Keep soft find highlights in sync while typing in the buffer.
         try:
             if self.query_one("#find-bar", FindBar).is_visible:
@@ -622,12 +760,12 @@ class ProseApp(App[None]):
             pass
 
     def _refresh_support_hints(self) -> None:
-        """Blue keys + dim labels (labels/pipes inherit $text-muted from CSS)."""
+        """Themed keys + dim labels (labels/pipes inherit $text-muted from CSS)."""
+        hk = token(self, "hint-key", "#007ACC")
         parts: list[str] = []
         for key, desc in self._SUPPORT_HINTS:
-            # Only the key is colored; description + spaces use widget $text-muted
-            # (same as tab filename). Explicit hex on labels was fighting theme/CSS.
-            parts.append(f"[#007ACC]{key}[/] {desc}")
+            # Only the key is colored (theme token); description uses widget muted.
+            parts.append(f"[{hk}]{key}[/] {desc}")
         try:
             self.query_one("#support-hints", Static).update("  |  ".join(parts))
         except Exception:
@@ -659,10 +797,10 @@ class ProseApp(App[None]):
         # Three slots after the name: " _ _ _|" — middle slot is dirty • (stable width)
         mid = "•" if doc.dirty else " "
         chip = f"   {name} {mid} |"
-        # Match footer hint labels ($text-muted / dull grey) — not body-text bright
+        # Theme tokens: active tab brighter, inactive dimmer.
         if active:
-            return f"[#858585]{chip}[/]"
-        return f"[#858585 65%]{chip}[/]"
+            return f"[{token(self, 'tab-active', '#C8C8C8')}]{chip}[/]"
+        return f"[{token(self, 'tab-inactive', '#7A7A7A')}]{chip}[/]"
 
     def _refresh_status(self) -> None:
         """Tab strip (all open docs), support metrics, and terminal title."""
@@ -721,7 +859,11 @@ class ProseApp(App[None]):
         self._toggle_menu(None)
 
     def on_key(self, event: Key) -> None:
-        """Hard fallback: some terminals drop priority bindings while TextArea is focused."""
+        """Hard fallback: some terminals drop priority bindings while TextArea is focused.
+
+        Only the small, portable keymap is handled here (all single-stroke). No
+        Ctrl+Shift, no chords — see docs/MARKSTAR_KEYMAP.md.
+        """
         try:
             menu = self.query_one("#app-menu", MenuBar)
             if menu.is_open:
@@ -733,58 +875,25 @@ class ProseApp(App[None]):
             event.stop()
             self.action_esc_key()
             return
-        if key == "f9" or key == "ctrl+shift+p":
+        if key == "f9":
             event.stop()
             self._toggle_menu(None)
             return
-        # Find/replace fallbacks when focus ate the binding.
-        if key in {"ctrl+r", "ctrl+h"}:
-            # Never treat Backspace as replace — only a true ctrl+h key name.
-            event.stop()
-            self.cmd_replace()
-            return
-        if key == "ctrl+enter":
-            event.stop()
-            self.cmd_find_prev()
-            return
-        if is_replace_all_key(key):
-            event.stop()
-            self.cmd_replace_all()
-            return
-        # Bulk file ops (Alt order / case variants).
-        if key in {"ctrl+alt+s", "alt+ctrl+s"}:
-            event.stop()
-            self.cmd_save_all()
-            return
-        if key in {"ctrl+shift+s"}:
-            event.stop()
-            self.cmd_save_as()
-            return
-        if key in {"ctrl+o"}:
-            event.stop()
-            self.cmd_open_file()
-            return
-        # Tab switching — include greater/less-than (what Shift+,/. often becomes)
-        if event.key in {
-            "ctrl+shift+.",
-            "ctrl+shift+full_stop",
-            "ctrl+shift+period",
-            "ctrl+shift+greater_than",
-            "ctrl+greater_than",
-            "ctrl+shift+right_angle_bracket",
-        }:
+        if key == "ctrl+pagedown":
             event.stop()
             self.cmd_next_tab()
             return
-        if event.key in {
-            "ctrl+shift+,",
-            "ctrl+shift+comma",
-            "ctrl+shift+less_than",
-            "ctrl+less_than",
-            "ctrl+shift+left_angle_bracket",
-        }:
+        if key == "ctrl+pageup":
             event.stop()
             self.cmd_prev_tab()
+            return
+        if key == "ctrl+b":
+            event.stop()
+            self.cmd_bold()
+            return
+        if key == "ctrl+e":
+            event.stop()
+            self.cmd_italic()
             return
 
     def _toggle_menu(self, menu_name: str | None) -> None:
@@ -1321,7 +1430,10 @@ class ProseApp(App[None]):
             self.cmd_replace()
             # User still needs a find string; don't replace blindly.
             if not bar.query:
-                self.notify("Enter a find string, then Ctrl+Alt+R for replace all", severity="warning")
+                self.notify(
+                    "Enter a find string, then use Replace All",
+                    severity="warning",
+                )
                 return
         elif not bar.is_replace_mode:
             bar.expand_replace()
@@ -1338,6 +1450,83 @@ class ProseApp(App[None]):
 
     def cmd_select_all(self) -> None:
         self.query_one("#editor", TextArea).select_all()
+
+    # --- Format menu: wrap/insert Markdown around the selection ---------------
+
+    def _wrap_selection(self, prefix: str, suffix: str | None = None) -> None:
+        """Wrap the current selection in ``prefix``…``suffix`` (suffix=prefix if omitted).
+
+        With no selection, insert both markers and park the caret between them.
+        Uses TextArea's own edit API so undo/redo and the document sync work.
+        """
+        suffix = prefix if suffix is None else suffix
+        editor = self.query_one("#editor", TextArea)
+        selected = editor.selected_text
+        if selected:
+            start, end = sorted([editor.selection.start, editor.selection.end])
+            editor.replace(f"{prefix}{selected}{suffix}", start, end)
+        else:
+            editor.insert(f"{prefix}{suffix}")
+            row, col = editor.cursor_location
+            editor.move_cursor((row, max(0, col - len(suffix))))
+        editor.focus()
+
+    def _prefix_current_line(self, marker: str) -> None:
+        """Prepend ``marker`` to the caret's line (headings, quotes, list items)."""
+        editor = self.query_one("#editor", TextArea)
+        row, col = editor.cursor_location
+        line = editor.document.get_line(row)
+        editor.replace(f"{marker}{line}", (row, 0), (row, len(line)))
+        editor.move_cursor((row, col + len(marker)))
+        editor.focus()
+
+    def cmd_bold(self) -> None:
+        self._wrap_selection("**")
+
+    def cmd_italic(self) -> None:
+        self._wrap_selection("*")
+
+    def cmd_strikethrough(self) -> None:
+        self._wrap_selection("~~")
+
+    def cmd_inline_code(self) -> None:
+        self._wrap_selection("`")
+
+    def cmd_link(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        selected = editor.selected_text
+        if selected:
+            start, end = sorted([editor.selection.start, editor.selection.end])
+            editor.replace(f"[{selected}](url)", start, end)
+        else:
+            editor.insert("[text](url)")
+        editor.focus()
+
+    def cmd_heading(self) -> None:
+        self._prefix_current_line("# ")
+
+    def cmd_blockquote(self) -> None:
+        self._prefix_current_line("> ")
+
+    def cmd_bullet_list(self) -> None:
+        self._prefix_current_line("- ")
+
+    def cmd_numbered_list(self) -> None:
+        self._prefix_current_line("1. ")
+
+    def cmd_hrule(self) -> None:
+        editor = self.query_one("#editor", TextArea)
+        editor.insert("\n---\n")
+        editor.focus()
+
+    def cmd_code_fence(self) -> None:
+        self._wrap_selection("```\n", "\n```")
+
+    def action_bold(self) -> None:
+        self.cmd_bold()
+
+    def action_italic(self) -> None:
+        self.cmd_italic()
 
     def _move_caret_to_index(self, index: int) -> None:
         editor = self.query_one("#editor", TextArea)
@@ -1410,6 +1599,125 @@ class ProseApp(App[None]):
         editor = self.query_one("#editor", TextArea)
         editor.soft_wrap = not editor.soft_wrap
         self.notify(f"Soft wrap {'on' if editor.soft_wrap else 'off'}")
+
+    def action_smart_copy(self) -> None:
+        """Ctrl+C: copy from whichever text widget has focus. Never quits.
+
+        Delegates to the focused TextArea/Input's own copy action; a bare
+        Ctrl+C anywhere else is a quiet no-op (quit is Ctrl+Q).
+        """
+        focused = self.focused
+        action = getattr(focused, "action_copy", None)
+        if callable(action):
+            action()
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy via OSC 52 (Textual) plus the OS-native clipboard tool.
+
+        OSC 52 works in many terminals (Windows Terminal, kitty, Ghostty, …)
+        but not all (VTE/GNOME Terminal ignores it), so we also pipe to the
+        platform's native tool. Per-OS dispatch — each platform only ever
+        invokes its own tool.
+        """
+        super().copy_to_clipboard(text)
+        self._native_clipboard_copy(text)
+
+    @staticmethod
+    def _native_clipboard_copy(text: str) -> None:
+        import os
+        import shutil
+        import subprocess
+
+        if sys.platform == "win32":
+            candidates = [["clip"]]  # ships with Windows
+        elif sys.platform == "darwin":
+            candidates = [["pbcopy"]]  # ships with macOS
+        else:
+            # Linux/BSD: prefer the tool matching the running session.
+            candidates = []
+            if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-copy"):
+                candidates.append(["wl-copy"])
+            if os.environ.get("DISPLAY"):
+                if shutil.which("xclip"):
+                    candidates.append(["xclip", "-selection", "clipboard"])
+                if shutil.which("xsel"):
+                    candidates.append(["xsel", "--clipboard", "--input"])
+
+        for cmd in candidates:
+            try:
+                subprocess.run(
+                    cmd,
+                    input=text.encode("utf-8"),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                    check=True,
+                )
+                return
+            except Exception:
+                continue
+
+    def cmd_toggle_mouse_capture(self) -> None:
+        """Toggle terminal mouse tracking.
+
+        Captured (default): MarkStar receives clicks/scroll/hover — but
+        terminals without OSC 22 pointer support (e.g. VTE/GNOME Terminal)
+        show an arrow pointer while any app tracks the mouse.
+        Released: the terminal's native I-beam pointer and native text
+        selection return; in-app clicking/scrolling/hover are off until
+        re-enabled.
+        """
+        driver = self._driver
+        if driver is None:
+            return
+        capturing = getattr(driver, "_mouse", True)
+        if capturing:
+            # Order matters: _disable_mouse_support() no-ops once _mouse is
+            # False, so write the "off" sequences first, then latch the flag
+            # (which also keeps suspend/resume from re-enabling tracking).
+            try:
+                driver._disable_mouse_support()
+            except Exception:
+                pass
+            driver._mouse = False
+            self.notify(
+                "Mouse released — native pointer & selection (View menu re-enables)"
+            )
+        else:
+            driver._mouse = True
+            try:
+                driver._enable_mouse_support()
+            except Exception:
+                pass
+            self.notify("Mouse captured — click, scroll, and hover enabled")
+
+    def cmd_toggle_formatting(self) -> None:
+        """Toggle inline Markdown rendering (bold/italic/code shown vs. raw)."""
+        editor = self.query_one("#editor", ProseTextArea)
+        editor.set_render_markdown(not editor.render_markdown)
+        self.notify(
+            f"Formatting preview {'on' if editor.render_markdown else 'off'}"
+        )
+
+    def cmd_cycle_theme(self) -> None:
+        """Rotate through the registered themes and repaint theme-driven colors."""
+        try:
+            idx = THEME_NAMES.index(self.theme)
+        except ValueError:
+            idx = -1
+        self.theme = THEME_NAMES[(idx + 1) % len(THEME_NAMES)]
+        # Repaint everything that resolves colors through theme tokens.
+        try:
+            self.query_one("#editor", ProseTextArea).refresh_theme_styles()
+        except Exception:
+            pass
+        self._refresh_support_hints()
+        self._refresh_status()
+        try:
+            self.query_one("#find-bar", FindBar)._refresh_hints()
+        except Exception:
+            pass
+        self.notify(f"Theme: {self.theme}")
 
     def cmd_about(self) -> None:
         self.notify(f"Prose {__version__} — terminal Markdown word processor · MIT")
@@ -1695,9 +2003,10 @@ class _ConfirmDialog(ModalScreen[bool]):
         with Vertical(id="confirm-panel"):
             yield Label(self._title, id="confirm-title")
             yield Label(self._message, id="confirm-message")
+            hk = token(self.app, "hint-key", "#007ACC")
             yield Label(
-                f"[#007ACC]Y[/]/Enter {self._yes_label}  ·  "
-                f"[#007ACC]N[/]/Esc {self._no_label}",
+                f"[{hk}]Y[/]/Enter {self._yes_label}  ·  "
+                f"[{hk}]N[/]/Esc {self._no_label}",
                 id="confirm-hint",
             )
 
@@ -1708,16 +2017,76 @@ class _ConfirmDialog(ModalScreen[bool]):
         self.dismiss(True)
 
 
+def _default_mouse_capture() -> bool:
+    """Pick the mouse-capture default for this platform/terminal.
+
+    Capture ON when it costs nothing pointer-wise:
+    - Terminals honoring OSC 22 (kitty, Ghostty, WezTerm, foot) show our
+      I-beam/hand while captured.
+    - Windows Terminal / conhost show an ARROW even with capture off
+      (microsoft/terminal#1441), so releasing gains nothing — keep clicks.
+    Capture OFF elsewhere (VTE/GNOME Terminal, macOS Terminal.app, unknown):
+    releasing restores the terminal's native I-beam and selection for writers.
+    """
+    if sys.platform == "win32":
+        return True
+    return _terminal_renders_pointer_shapes()
+
+
+def _terminal_renders_pointer_shapes() -> bool:
+    """Best-effort: does this terminal honor OSC 22 pointer shapes?
+
+    Terminals that do (kitty, Ghostty, WezTerm, foot) show our I-beam/hand
+    while the mouse is captured, so capture costs nothing there. Terminals
+    that don't (VTE/GNOME Terminal, Windows conhost, …) show an arrow while
+    any app tracks the mouse — for those we default capture OFF so writers
+    keep the native text caret. Detection is by environment markers; no
+    escape-sequence round-trip.
+    """
+    import os
+
+    env = os.environ
+    if env.get("KITTY_WINDOW_ID") or "kitty" in env.get("TERM", ""):
+        return True
+    if env.get("WEZTERM_PANE") or env.get("WEZTERM_EXECUTABLE"):
+        return True
+    if "ghostty" in env.get("TERM", "") or env.get("GHOSTTY_RESOURCES_DIR"):
+        return True
+    if env.get("TERM", "").startswith("foot"):
+        return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="prose", description="Prose — terminal Markdown word processor"
     )
     parser.add_argument("path", nargs="?", type=Path, help="Markdown file to open")
+    mouse_group = parser.add_mutually_exclusive_group()
+    mouse_group.add_argument(
+        "--mouse",
+        action="store_true",
+        help="force mouse capture on (click-to-position, scroll, hover)",
+    )
+    mouse_group.add_argument(
+        "--no-mouse",
+        action="store_true",
+        help="force mouse capture off (terminal-native I-beam pointer & selection)",
+    )
     parser.add_argument("--version", action="version", version=f"Prose {__version__}")
     args = parser.parse_args(argv)
 
+    if args.mouse:
+        mouse = True
+    elif args.no_mouse:
+        mouse = False
+    else:
+        # Per-platform/terminal default — see _default_mouse_capture().
+        # View > Mouse Capture toggles at runtime either way.
+        mouse = _default_mouse_capture()
+
     app = ProseApp(path=args.path)
-    app.run()
+    app.run(mouse=mouse)
 
 
 if __name__ == "__main__":
