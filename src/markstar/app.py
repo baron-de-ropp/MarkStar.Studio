@@ -738,16 +738,7 @@ class MarkStarApp(App[None]):
         editor.show_line_numbers = False
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
-        # Editor syntax/selection colors: Textual's built-in VS Code Dark map
-        try:
-            from textual.widgets.text_area import TextAreaTheme
-
-            vs = TextAreaTheme.get_builtin_theme("vscode_dark")
-            if vs is not None:
-                editor.register_theme(vs)
-                editor.theme = "vscode_dark"
-        except Exception:
-            pass
+        self._apply_editor_theme()
 
         launch_root: Path | None = None  # folder to open the panel at
         launch_focus_tree = False
@@ -781,6 +772,31 @@ class MarkStarApp(App[None]):
     def on_resize(self, event) -> None:
         self._update_prose_layout()
 
+    def _apply_editor_theme(self) -> None:
+        """Give the editor a TextArea theme whose background matches the app
+        theme exactly (Textual's built-in vscode_dark paints #1f1f1f, a hair
+        lighter than our $background — that mismatch is visible)."""
+        import dataclasses
+
+        try:
+            from textual.widgets.text_area import TextAreaTheme
+
+            editor = self.query_one("#editor", MarkStarTextArea)
+            base = TextAreaTheme.get_builtin_theme("vscode_dark")
+            if base is None:
+                return
+            bg = self.theme_variables.get("background", "#1E1E1E")
+            fg = self.theme_variables.get("foreground", "#D4D4D4")
+            themed = dataclasses.replace(
+                base,
+                name="markstar-editor",
+                base_style=Style(color=fg, bgcolor=bg),
+            )
+            editor.register_theme(themed)
+            editor.theme = "markstar-editor"
+        except Exception:
+            pass
+
     def _prose_margin(self) -> int:
         """Left/right margin (columns) for the prose frame.
 
@@ -804,11 +820,17 @@ class MarkStarApp(App[None]):
         rules, text, and footer share one centered (or fixed) measure — and align
         the menu ribbon and grow the project panel to match."""
         margin = self._prose_margin()
-        for sel in ("#tab-strip", "#status-rule-row", "#support-row"):
+        for sel in ("#tab-strip", "#status-rule-row"):
             try:
                 self.query_one(sel).styles.padding = (0, margin)
             except Exception:
                 pass
+        # Footer hint + stats align with the tab filename, which sits 3 cols in
+        # (the "   " lead on each tab chip).
+        try:
+            self.query_one("#support-row").styles.padding = (0, margin + 3)
+        except Exception:
+            pass
         for sel in ("#editor-left-pad", "#editor-right-pad"):
             try:
                 self.query_one(sel).styles.width = margin
@@ -936,12 +958,10 @@ class MarkStarApp(App[None]):
             return 1, 1
 
     def _refresh_metrics(self) -> None:
-        """Right-aligned: Ln:Col (volatile first), words, Markdown flavor."""
-        line, col = self._cursor_line_col()
+        """Right-aligned: characters, words, Markdown flavor."""
+        chars = len(self.document.text)
         words = self.document.word_count()
-        # Fixed-ish order: line/col changes often — keep it leftmost of the group
-        # so word count and flavor don't jump as the caret moves.
-        text = f"Ln {line}, Col {col}  │  {words} words  │  CommonMark"
+        text = f"{chars} characters  │  {words} words  │  CommonMark"
         try:
             self.query_one("#support-metrics", Static).update(text)
         except Exception:
@@ -2028,6 +2048,7 @@ class MarkStarApp(App[None]):
             idx = -1
         self.theme = THEME_NAMES[(idx + 1) % len(THEME_NAMES)]
         # Repaint everything that resolves colors through theme tokens.
+        self._apply_editor_theme()
         try:
             self.query_one("#editor", MarkStarTextArea).refresh_theme_styles()
         except Exception:
