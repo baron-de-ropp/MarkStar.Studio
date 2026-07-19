@@ -93,7 +93,73 @@ MARKSTAR_LIGHT = Theme(
     variables=_LIGHT_VARS,
 )
 
-ALL_THEMES = [VSCODE_DARK, MARKSTAR_LIGHT]
+# --- Gruvbox dark -----------------------------------------------------------
+GRUVBOX_DARK = Theme(
+    name="gruvbox-dark",
+    primary="#83A598",
+    secondary="#8EC07C",
+    accent="#458588",
+    foreground="#EBDBB2",
+    background="#282828",
+    surface="#32302F",
+    panel="#3C3836",
+    boost="#32302F",
+    warning="#FABD2F",
+    error="#FB4934",
+    success="#B8BB26",
+    dark=True,
+    variables={
+        "hint-key": "#83A598",
+        "search-match": "#504945",
+        "tab-active": "#FBF1C7",
+        "tab-inactive": "#928374",
+        "rule": "#504945",
+        "md-marker": "#665C54",
+        "md-strong": "#FBF1C7",
+        "md-emphasis": "#EBDBB2",
+        "md-code": "#FE8019",
+        "md-heading": "#FABD2F",
+        "md-quote": "#B8BB26",
+        "md-link": "#83A598",
+        "md-include": "#8EC07C",
+        "spell-underline": "#FB4934",
+    },
+)
+
+# --- Nord -------------------------------------------------------------------
+NORD = Theme(
+    name="nord",
+    primary="#88C0D0",
+    secondary="#8FBCBB",
+    accent="#5E81AC",
+    foreground="#D8DEE9",
+    background="#2E3440",
+    surface="#3B4252",
+    panel="#434C5E",
+    boost="#3B4252",
+    warning="#EBCB8B",
+    error="#BF616A",
+    success="#A3BE8C",
+    dark=True,
+    variables={
+        "hint-key": "#88C0D0",
+        "search-match": "#434C5E",
+        "tab-active": "#ECEFF4",
+        "tab-inactive": "#6C7A96",
+        "rule": "#434C5E",
+        "md-marker": "#4C566A",
+        "md-strong": "#ECEFF4",
+        "md-emphasis": "#E5E9F0",
+        "md-code": "#D08770",
+        "md-heading": "#81A1C1",
+        "md-quote": "#A3BE8C",
+        "md-link": "#88C0D0",
+        "md-include": "#8FBCBB",
+        "spell-underline": "#BF616A",
+    },
+)
+
+ALL_THEMES = [VSCODE_DARK, MARKSTAR_LIGHT, GRUVBOX_DARK, NORD]
 THEME_NAMES = [t.name for t in ALL_THEMES]
 DEFAULT_THEME_NAME = "vscode-dark"
 

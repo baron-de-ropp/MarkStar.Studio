@@ -47,12 +47,12 @@ from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree
 from markstar.ui.spell_bar import SpellBar
 from markstar.ui.suggest_popup import SuggestPopup
+from markstar.ui.theme_picker import ThemePicker
 from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
+    ALL_THEMES,
     DEFAULT_THEME_NAME,
-    MARKSTAR_LIGHT,
     THEME_NAMES,
-    VSCODE_DARK,
     token,
 )
 
@@ -620,8 +620,8 @@ class MarkStarApp(App[None]):
     ) -> None:
         super().__init__()
         self.prefs = prefs or Preferences()
-        self.register_theme(VSCODE_DARK)
-        self.register_theme(MARKSTAR_LIGHT)
+        for _theme in ALL_THEMES:
+            self.register_theme(_theme)
         self.theme = self.prefs.theme  # validated to a known theme on load
         self._path_arg = path
         self.workspace = Workspace()
@@ -772,7 +772,7 @@ class MarkStarApp(App[None]):
         add("suggest", "Suggest Correction", "Tools", self.cmd_suggest, "ctrl+g")
         add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
-        add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
+        add("theme_picker", "Theme…", "View", self.cmd_theme_picker)
 
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
         add("about", "About…", "Help", self.cmd_about)
@@ -2508,14 +2508,9 @@ class MarkStarApp(App[None]):
             f"Formatting preview {'on' if editor.render_markdown else 'off'}"
         )
 
-    def cmd_cycle_theme(self) -> None:
-        """Rotate through the registered themes and repaint theme-driven colors."""
-        try:
-            idx = THEME_NAMES.index(self.theme)
-        except ValueError:
-            idx = -1
-        self.theme = THEME_NAMES[(idx + 1) % len(THEME_NAMES)]
-        # Repaint everything that resolves colors through theme tokens.
+    def _apply_theme(self, name: str) -> None:
+        """Switch to a theme and repaint everything that resolves theme tokens."""
+        self.theme = name
         self._apply_editor_theme()
         try:
             self.query_one("#editor", MarkStarTextArea).refresh_theme_styles()
@@ -2523,13 +2518,40 @@ class MarkStarApp(App[None]):
             pass
         self._refresh_support_hints()
         self._refresh_status()
+        for sel, cls in (("#find-bar", FindBar), ("#spell-bar", SpellBar)):
+            try:
+                self.query_one(sel, cls)._refresh_hints()
+            except Exception:
+                pass
+
+    def cmd_theme_picker(self) -> None:
+        """Open the theme picker with live preview (Enter keeps, Esc reverts)."""
+        self.run_worker(self._theme_picker_async())
+
+    async def _theme_picker_async(self) -> None:
+        original = self.theme
+        chosen = await self.push_screen_wait(
+            ThemePicker(list(THEME_NAMES), original, self._apply_theme)
+        )
+        if chosen:
+            self._apply_theme(chosen)
+            self.prefs.theme = chosen
+            self.prefs.save()
+            self.notify(f"Theme: {chosen}")
+        else:  # cancelled → revert the live preview
+            self._apply_theme(original)
+
+    def cmd_cycle_theme(self) -> None:
+        """Rotate to the next registered theme (kept for a quick cycle)."""
         try:
-            self.query_one("#find-bar", FindBar)._refresh_hints()
-        except Exception:
-            pass
-        self.prefs.theme = self.theme
+            idx = THEME_NAMES.index(self.theme)
+        except ValueError:
+            idx = -1
+        name = THEME_NAMES[(idx + 1) % len(THEME_NAMES)]
+        self._apply_theme(name)
+        self.prefs.theme = name
         self.prefs.save()
-        self.notify(f"Theme: {self.theme}")
+        self.notify(f"Theme: {name}")
 
     def cmd_about(self) -> None:
         self.notify(f"MarkStar {__version__} — markstar.studio · a Markdown-native homage to WordStar · MIT")
