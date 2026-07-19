@@ -46,6 +46,7 @@ from markstar.ui.keys import normalize_key
 from markstar.ui.menu_bar import MenuBar
 from markstar.ui.project_panel import ProjectPanel, WriterTree
 from markstar.ui.spell_bar import SpellBar
+from markstar.ui.suggest_popup import SuggestPopup
 from markstar.ui.welcome import WelcomeScreen
 from markstar.ui.themes import (
     DEFAULT_THEME_NAME,
@@ -768,6 +769,7 @@ class MarkStarApp(App[None]):
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
         add("toggle_spellcheck", "Spellcheck", "Tools", self.cmd_toggle_spellcheck)
         add("spelling", "Spelling…", "Tools", self.cmd_spelling)
+        add("suggest", "Suggest Correction", "Tools", self.cmd_suggest, "ctrl+g")
         add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
@@ -1241,6 +1243,10 @@ class MarkStarApp(App[None]):
         if key == "ctrl+p":
             event.stop()
             self.cmd_toggle_project_panel()
+            return
+        if key == "ctrl+g":
+            event.stop()
+            self.cmd_suggest()
             return
         if key == "ctrl+b":
             event.stop()
@@ -2339,6 +2345,47 @@ class MarkStarApp(App[None]):
                 self._refresh_status()
                 self.notify(f"Restored unsaved changes to {path.name}")
                 return
+
+    def cmd_suggest(self) -> None:
+        """Pop a suggestion list at the caret for the misspelled word under it."""
+        editor = self.query_one("#editor", MarkStarTextArea)
+        row, col = editor.cursor_location
+        line = editor.document.get_line(row)
+        a, b = _word_bounds(line, col)
+        if a == b:
+            self.notify("Put the caret on a word first")
+            return
+        word = line[a:b]
+        if self._speller.known(word):
+            self.notify(f"“{word}” is spelled correctly")
+            return
+        suggestions = self._speller.suggestions(word)
+        if not suggestions:
+            self.notify(f"No suggestions for “{word}”")
+            return
+        off = editor.cursor_screen_offset
+        self.run_worker(self._suggest_async(row, a, b, word, suggestions, off))
+
+    async def _suggest_async(
+        self, row, a, b, word, suggestions, off
+    ) -> None:
+        # Anchor just below the caret; flip above if it would run off the bottom.
+        popup_h = min(len(suggestions) + 2, 12)
+        y = off.y + 1
+        if y + popup_h > self.size.height:
+            y = max(0, off.y - popup_h)
+        x = max(0, min(off.x, self.size.width - 42))
+        chosen = await self.push_screen_wait(
+            SuggestPopup(word, suggestions, (x, y))
+        )
+        if not chosen:
+            return
+        editor = self.query_one("#editor", TextArea)
+        # Recompute the span (nothing else could edit while the modal was up).
+        line = editor.document.get_line(row)
+        if line[a:b] == word:
+            editor.replace(chosen, (row, a), (row, b))
+        editor.focus()
 
     def cmd_toggle_spellcheck(self) -> None:
         """Toggle underlining of misspelled words."""
