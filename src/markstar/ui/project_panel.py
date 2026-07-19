@@ -47,8 +47,9 @@ class ProjectPanel(Vertical):
         width: 40;
         height: 100%;
         display: none;
-        background: $surface;
-        border-right: solid $accent 35%;
+        /* Same chrome as the find/replace and spelling bars. */
+        background: $boost;
+        border-right: solid $accent 30%;
     }
 
     ProjectPanel.visible {
@@ -68,17 +69,17 @@ class ProjectPanel(Vertical):
         width: 100%;
         height: 1fr;
         padding: 0 0 0 1;
-        background: $surface;
+        background: $boost;
         color: $text-muted;
         /* Match the editor's subtle scrollbar (same faint thumb). */
         scrollbar-size-vertical: 1;
-        scrollbar-background: $surface;
-        scrollbar-background-hover: $surface;
-        scrollbar-background-active: $surface;
+        scrollbar-background: $boost;
+        scrollbar-background-hover: $boost;
+        scrollbar-background-active: $boost;
         scrollbar-color: $text-muted 12%;
         scrollbar-color-hover: $text-muted 45%;
         scrollbar-color-active: $text-muted 55%;
-        scrollbar-corner-color: $surface;
+        scrollbar-corner-color: $boost;
     }
 
     ProjectPanel WriterTree > .directory-tree--folder {

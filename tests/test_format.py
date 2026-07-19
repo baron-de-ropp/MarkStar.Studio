@@ -53,6 +53,50 @@ def test_heading_prefixes_line() -> None:
     assert _run(go()) == "# Title"
 
 
+def test_bold_toggles_word_under_caret() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            ed = app.query_one("#editor")
+            ed.load_text("the quick fox")
+            ed.move_cursor((0, 7))  # inside "quick", no selection
+            await pilot.pause()
+            app.cmd_bold()
+            await pilot.pause()
+            after_bold = ed.text
+            ed.move_cursor((0, 8))  # inside **quick**
+            app.cmd_bold()
+            await pilot.pause()
+            return after_bold, ed.text
+
+    bolded, unbolded = _run(go())
+    assert bolded == "the **quick** fox"
+    assert unbolded == "the quick fox"
+
+
+def test_italic_toggles_selection() -> None:
+    from textual.widgets.text_area import Selection
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            ed = app.query_one("#editor")
+            ed.load_text("hello world")
+            ed.selection = Selection((0, 0), (0, 5))
+            await pilot.pause()
+            app.cmd_italic()
+            await pilot.pause()
+            on = ed.text
+            ed.selection = Selection((0, 1), (0, 6))  # "hello" inside *…*
+            app.cmd_italic()
+            await pilot.pause()
+            return on, ed.text
+
+    on, off = _run(go())
+    assert on == "*hello* world"
+    assert off == "hello world"
+
+
 def test_bold_with_no_selection_inserts_markers() -> None:
     async def go():
         app = MarkStarApp()

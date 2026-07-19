@@ -1821,17 +1821,80 @@ class MarkStarApp(App[None]):
         editor.move_cursor((row, col + len(marker)))
         editor.focus()
 
+    @staticmethod
+    def _word_bounds(line: str, col: int) -> tuple[int, int]:
+        """Expand ``col`` to the word (letters/digits/apostrophes) around it."""
+        n = len(line)
+        col = max(0, min(col, n))
+
+        def is_word(ch: str) -> bool:
+            return ch.isalnum() or ch == "'"
+
+        start = col
+        while start > 0 and is_word(line[start - 1]):
+            start -= 1
+        end = col
+        while end < n and is_word(line[end]):
+            end += 1
+        return start, end
+
+    def _toggle_emphasis(self, marker: str, regex: "re.Pattern") -> None:
+        """Toggle ``marker`` (**, *, ~~, `) on the selection or the word under
+        the caret — wrap if plain, strip the markers if already emphasized."""
+        editor = self.query_one("#editor", TextArea)
+        (sr, sc), (er, ec) = editor.selection.start, editor.selection.end
+        if sr != er:  # multi-line selection → plain wrap (no toggle)
+            self._wrap_selection(marker)
+            return
+        row = sr
+        line = editor.document.get_line(row)
+        mlen = len(marker)
+        caret = editor.cursor_location[1]
+        if sc != ec:
+            a, b = sorted((sc, ec))
+        else:
+            a, b = self._word_bounds(line, caret)
+
+        enclosing = None
+        for m in regex.finditer(line):
+            if m.start() <= a and b <= m.end():
+                enclosing = m
+                break
+
+        if enclosing is not None:  # already emphasized → strip markers
+            s, e = enclosing.start(), enclosing.end()
+            new_line = line[:s] + line[s + mlen : e - mlen] + line[e:]
+            if caret <= s:
+                nc = caret
+            elif caret <= s + mlen:
+                nc = s
+            elif caret <= e - mlen:
+                nc = caret - mlen
+            else:
+                nc = caret - 2 * mlen
+        else:  # wrap the range (or insert empty markers at a bare caret)
+            new_line = line[:a] + marker + line[a:b] + marker + line[b:]
+            if caret <= a:
+                nc = caret
+            elif caret <= b:
+                nc = caret + mlen
+            else:
+                nc = caret + 2 * mlen
+        editor.replace(new_line, (row, 0), (row, len(line)))
+        editor.move_cursor((row, max(0, min(nc, len(new_line)))))
+        editor.focus()
+
     def cmd_bold(self) -> None:
-        self._wrap_selection("**")
+        self._toggle_emphasis("**", _RE_BOLD)
 
     def cmd_italic(self) -> None:
-        self._wrap_selection("*")
+        self._toggle_emphasis("*", _RE_ITALIC)
 
     def cmd_strikethrough(self) -> None:
-        self._wrap_selection("~~")
+        self._toggle_emphasis("~~", _RE_STRIKE)
 
     def cmd_inline_code(self) -> None:
-        self._wrap_selection("`")
+        self._toggle_emphasis("`", _RE_CODE)
 
     def cmd_link(self) -> None:
         editor = self.query_one("#editor", TextArea)
