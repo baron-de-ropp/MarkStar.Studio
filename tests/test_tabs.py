@@ -86,3 +86,45 @@ def test_prose_width_defaults_to_120(tmp_path, monkeypatch) -> None:
     prefs = Preferences.load()
     assert prefs.prose_width == 120
     assert prefs.panel_width == 40  # new default
+
+
+def test_prose_centering_margins() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(200, 24)) as pilot:
+            await pilot.pause()
+            wide = app._prose_margin()  # (200-120)//2 = 40
+            app.cmd_toggle_center()
+            await pilot.pause()
+            off = app._prose_margin()  # base 5
+            return wide, off
+
+    wide, off = _run(go())
+    assert wide == 40
+    assert off == 5
+
+
+def test_narrow_terminal_floors_margin() -> None:
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(100, 24)) as pilot:
+            await pilot.pause()
+            return app._prose_margin()
+
+    assert _run(go()) == 5  # (100-120)//2 negative → floor at base
+
+
+def test_opening_same_document_twice_reuses_tab(tmp_path) -> None:
+    (tmp_path / "a.md").write_text("# A")
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            app.workspace.open_path(tmp_path / "a.md")
+            app._load_active_into_editor()
+            app.workspace.open_path(tmp_path / "a.md")  # same file again
+            app._load_active_into_editor()
+            await pilot.pause()
+            return app.workspace.count
+
+    assert _run(go()) == 1

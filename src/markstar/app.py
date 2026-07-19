@@ -397,7 +397,7 @@ class MarkStarApp(App[None]):
         layers: base overlay;
     }
 
-    #editor-left-pad {
+    #editor-left-pad, #editor-right-pad {
         width: 5;
         height: 1fr;
         background: $background;
@@ -644,6 +644,7 @@ class MarkStarApp(App[None]):
         add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+pagedown")
         add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
+        add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("cycle_theme", "Switch Theme", "View", self.cmd_cycle_theme)
         add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
@@ -672,6 +673,7 @@ class MarkStarApp(App[None]):
                 yield ProjectPanel(self._project_root(), id="project-panel")
                 yield Static("", id="editor-left-pad")
                 yield MarkStarTextArea(id="editor")
+                yield Static("", id="editor-right-pad")
             with Vertical(id="bottom-chrome"):
                 with Horizontal(id="status-rule-row"):
                     yield Static("", id="status-rule")
@@ -682,13 +684,9 @@ class MarkStarApp(App[None]):
                 yield Static("", id="support-pad-bottom")
 
     # Support-strip shortcuts (key label shown in blue, description dim).
+    # The menu holds the full command list; the footer stays quiet.
     _SUPPORT_HINTS: list[tuple[str, str]] = [
         ("Esc", "Menu"),
-        ("Ctrl+S", "Save"),
-        ("Ctrl+F", "Find"),
-        ("Ctrl+B", "Bold"),
-        ("Ctrl+Z", "Undo"),
-        ("Ctrl+Q", "Quit"),
     ]
 
     def on_mount(self) -> None:
@@ -748,9 +746,38 @@ class MarkStarApp(App[None]):
         self._load_active_into_editor()
         editor.focus()
         self._refresh_status()
-        self.call_after_refresh(self._update_prose_rules)
+        self._update_prose_layout()
 
     def on_resize(self, event) -> None:
+        self._update_prose_layout()
+
+    def _prose_margin(self) -> int:
+        """Left/right margin (columns) for the prose frame.
+
+        Centered: margin grows so the ≤ prose_width column sits mid-terminal.
+        Not centered: a fixed comfortable outer margin (spec: 5 at ≥90 cols,
+        else 2; never 0).
+        """
+        width = self.size.width or 0
+        base = 5 if width >= 90 else 2
+        if not self.prefs.center_text:
+            return base
+        return max(base, (width - self.prefs.prose_width) // 2)
+
+    def _update_prose_layout(self) -> None:
+        """Apply the current margin to every element of the prose frame so tabs,
+        rules, text, and footer share one centered (or fixed) measure."""
+        margin = self._prose_margin()
+        for sel in ("#tab-strip", "#status-rule-row", "#support-row"):
+            try:
+                self.query_one(sel).styles.padding = (0, margin)
+            except Exception:
+                pass
+        for sel in ("#editor-left-pad", "#editor-right-pad"):
+            try:
+                self.query_one(sel).styles.width = margin
+            except Exception:
+                pass
         self.call_after_refresh(self._update_prose_rules)
 
     def _update_prose_rules(self) -> None:
@@ -1917,6 +1944,13 @@ class MarkStarApp(App[None]):
             self.prefs.mouse = "on"
             self.prefs.save()
             self.notify("Mouse captured — click, scroll, and hover enabled")
+
+    def cmd_toggle_center(self) -> None:
+        """Toggle dynamic centering of the prose column."""
+        self.prefs.center_text = not self.prefs.center_text
+        self.prefs.save()
+        self._update_prose_layout()
+        self.notify(f"Center text {'on' if self.prefs.center_text else 'off'}")
 
     def cmd_toggle_formatting(self) -> None:
         """Toggle inline Markdown rendering (bold/italic/code shown vs. raw)."""

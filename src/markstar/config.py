@@ -54,6 +54,7 @@ class Preferences:
     soft_wrap: bool = True
     panel_width: int = 40  # project panel columns
     prose_width: int = 120  # max writing-measure columns (line wrap cap)
+    center_text: bool = True  # center the prose column in the terminal
 
     @classmethod
     def load(cls) -> "Preferences":
@@ -74,6 +75,8 @@ class Preferences:
             prefs.formatting = data["formatting"]
         if isinstance(data.get("soft_wrap"), bool):
             prefs.soft_wrap = data["soft_wrap"]
+        if isinstance(data.get("center_text"), bool):
+            prefs.center_text = data["center_text"]
         prefs.panel_width = _clamp_int(data.get("panel_width"), prefs.panel_width, 15, 80)
         prefs.prose_width = _clamp_int(data.get("prose_width"), prefs.prose_width, 40, 400)
         return prefs
