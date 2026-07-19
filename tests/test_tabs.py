@@ -106,6 +106,29 @@ def test_prose_centered_in_full_width_panel_overlays() -> None:
         assert panel_c == 0 and panel_o > 0
 
 
+def test_shrinking_from_large_updates_rules_same_frame() -> None:
+    """Resizing down from a big window must relayout to the NEW width immediately —
+    not lag one resize behind (which left the rules/padding at the old width)."""
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(220, 50)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.resize_terminal(130, 35)
+            for _ in range(6):
+                await pilot.pause()
+            strip = app.query_one("#tab-strip")
+            rule = app.query_one("#tab-rule")
+            return app.size.width, strip.styles.padding.left, rule.size.width
+
+    width, pad_left, rule_w = _run(go())
+    assert width == 130
+    # 130 wide, centered, base inset 5 → prose column 120, pad 5 each side.
+    assert pad_left == 5, f"padding lagged the resize (left={pad_left})"
+    assert rule_w == 120, f"rule width lagged the resize (w={rule_w})"
+
+
 def test_centering_narrows_and_toggle_off_widens() -> None:
     async def go():
         app = MarkStarApp()

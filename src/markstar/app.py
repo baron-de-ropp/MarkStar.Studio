@@ -880,7 +880,15 @@ class MarkStarApp(App[None]):
             self.call_after_refresh(self._run_spellcheck)
 
     def on_resize(self, event) -> None:
-        self._update_prose_layout()
+        # Use the size the event carries, not self.size — the latter isn't updated
+        # until after this handler runs, so reading it here lags one resize behind
+        # (rules/padding keep the *previous* window's width). See event.size.
+        width = None
+        try:
+            width = event.size.width
+        except Exception:
+            width = None
+        self._update_prose_layout(width)
 
     def on_unmount(self) -> None:
         self._reset_terminal_bg()
@@ -964,11 +972,15 @@ class MarkStarApp(App[None]):
         except Exception:
             return False
 
-    def _update_prose_layout(self) -> None:
+    def _update_prose_layout(self, width: int | None = None) -> None:
         """Position tabs, rules, editor, footer and menu into one centered prose
         column that sits clear of the project panel. Recomputed on every resize
-        and whenever the panel opens/closes."""
-        width = self.size.width or 0
+        and whenever the panel opens/closes.
+
+        ``width`` may be passed explicitly (e.g. from a Resize event, whose size
+        is fresh) — otherwise the current ``self.size`` is used."""
+        if width is None:
+            width = self.size.width or 0
         panel, left_pad, col, right_pad = self._compute_layout(width, self._panel_open())
 
         if panel:
