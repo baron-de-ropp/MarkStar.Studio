@@ -67,6 +67,23 @@ _RE_STRIKE = re.compile(r"~~([^~\n]+)~~")
 _RE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
+def _word_bounds(line: str, col: int) -> tuple[int, int]:
+    """Expand ``col`` to the word (letters/digits/apostrophes) around it."""
+    n = len(line)
+    col = max(0, min(col, n))
+
+    def is_word(ch: str) -> bool:
+        return ch.isalnum() or ch == "'"
+
+    start = col
+    while start > 0 and is_word(line[start - 1]):
+        start -= 1
+    end = col
+    while end < n and is_word(line[end]):
+        end += 1
+    return start, end
+
+
 def _markdown_spans(line: str) -> list[tuple[int, int, str]]:
     """Return (start, end, style-key) spans for inline Markdown on one line.
 
@@ -229,6 +246,25 @@ class MarkStarTextArea(TextArea):
         except Exception:
             return False
         return any(m.start() <= col < m.end() for m in _RE_LINK.finditer(line))
+
+    def on_click(self, event: events.Click) -> None:
+        """Single click = place caret (TextArea default); double = select word;
+        triple = select line. Uses the click ``chain`` count."""
+        if event.chain < 2:
+            return
+        try:
+            row, col = self.get_target_document_location(event)
+        except Exception:
+            return
+        if event.chain == 2:
+            line = self.document.get_line(row)
+            a, b = _word_bounds(line, col)
+            if a != b:
+                self.selection = Selection((row, a), (row, b))
+                event.stop()
+        else:  # triple (or more) → whole line
+            self.select_line(row)
+            event.stop()
 
     async def _on_mouse_move(self, event: events.MouseMove) -> None:
         await super()._on_mouse_move(event)
@@ -1050,8 +1086,30 @@ class MarkStarApp(App[None]):
 
         self._refresh_metrics()
         self.call_after_refresh(self._update_prose_rules)
+        self._refresh_panel_open_files()
         name = self.document.path.name if self.document.path else "Untitled"
         self.title = f"{name}{' •' if self.document.dirty else ''}"
+
+    def _refresh_panel_open_files(self) -> None:
+        """Tell the project panel which files are open (bright) and active."""
+        open_paths: set[str] = set()
+        active: str | None = None
+        for i, doc in enumerate(self.workspace.documents):
+            if doc.path is None:
+                continue
+            try:
+                key = str(doc.path.resolve())
+            except Exception:
+                continue
+            open_paths.add(key)
+            if i == self.workspace.active_index:
+                active = key
+        try:
+            self.query_one("#project-panel", ProjectPanel).set_open_files(
+                open_paths, active
+            )
+        except Exception:
+            pass
 
     def handle_tab_click(self, x: int) -> None:
         """Route a click in the tab ribbon: × closes that tab, else activates it."""
@@ -1821,23 +1879,6 @@ class MarkStarApp(App[None]):
         editor.move_cursor((row, col + len(marker)))
         editor.focus()
 
-    @staticmethod
-    def _word_bounds(line: str, col: int) -> tuple[int, int]:
-        """Expand ``col`` to the word (letters/digits/apostrophes) around it."""
-        n = len(line)
-        col = max(0, min(col, n))
-
-        def is_word(ch: str) -> bool:
-            return ch.isalnum() or ch == "'"
-
-        start = col
-        while start > 0 and is_word(line[start - 1]):
-            start -= 1
-        end = col
-        while end < n and is_word(line[end]):
-            end += 1
-        return start, end
-
     def _toggle_emphasis(self, marker: str, regex: "re.Pattern") -> None:
         """Toggle ``marker`` (**, *, ~~, `) on the selection or the word under
         the caret — wrap if plain, strip the markers if already emphasized."""
@@ -1853,7 +1894,7 @@ class MarkStarApp(App[None]):
         if sc != ec:
             a, b = sorted((sc, ec))
         else:
-            a, b = self._word_bounds(line, caret)
+            a, b = _word_bounds(line, caret)
 
         enclosing = None
         for m in regex.finditer(line):
