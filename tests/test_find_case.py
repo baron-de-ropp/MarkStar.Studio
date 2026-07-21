@@ -106,3 +106,36 @@ def test_replace_all_respects_case_mode() -> None:
     assert "the keeper wakes" in text     # replaced
     assert "The Warden sleeps" in text    # left alone
     assert "WARDEN." in text              # left alone
+
+
+def test_f3_steps_matches_from_the_editor() -> None:
+    """F3 must work with the find bar closed — that's the whole point of it."""
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            app.workspace.active.set_text("warden one\nwarden two\nwarden three\n")
+            app._load_active_into_editor()
+            await pilot.pause()
+            app.cmd_find()
+            await pilot.pause()
+            bar = app.query_one("#find-bar", FindBar)
+            bar.query_one("#find-input").value = "warden"
+            for _ in range(3):
+                await pilot.pause()
+            bar.hide()
+            app.query_one("#editor").focus()
+            for _ in range(3):
+                await pilot.pause()
+
+            lines = []
+            for _ in range(4):
+                await pilot.press("f3")
+                for _ in range(3):
+                    await pilot.pause()
+                lines.append(app.query_one("#editor").cursor_location[0])
+            return bar.is_visible, lines
+
+    visible, lines = _run(go())
+    assert visible is False           # never had to reopen the bar
+    assert lines == [1, 2, 0, 1]      # steps forward, then wraps

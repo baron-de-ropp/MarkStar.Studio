@@ -40,6 +40,7 @@
 | `Ctrl+Q` | **Quit** (restored — no longer a prefix) |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
 | `Ctrl+F` / `Ctrl+R` | Find / Replace |
+| `F3` | Find next (from the text — the find bar need not be open or focused) |
 | `↓` / `Enter` · `↑` | (find bar focused) next match / previous match |
 | `Ctrl+A` | Select all |
 | `Ctrl+B` | **Bold** — wraps selection in `**…**` |
@@ -48,7 +49,7 @@
 | `Ctrl+K` | StarBot AI panel |
 | `Ctrl+G` | Suggest spelling correction |
 | `F7` | Toggle spellcheck |
-| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous tab |
+| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous tab — **intercepted by VTE terminals** (GNOME Terminal binds them to its own tabs); the View menu is the reliable path |
 | `Esc` / `F9` | Open menu ribbon |
 
 > **Why not `Ctrl+I` for italic?** In a terminal `Ctrl+I` *is* the Tab key — physically unavailable. Italic uses `Ctrl+E` instead ("emphasis"). The rest of the formatting set lives in the **Format menu** (below).

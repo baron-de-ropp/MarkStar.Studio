@@ -935,7 +935,9 @@ class MarkStarApp(App[None]):
         )
         add("find", "Find…", "Edit", self.cmd_find, "ctrl+f")
         add("replace", "Replace…", "Edit", self.cmd_replace, "ctrl+r")
-        add("find_next", "Find Next", "Edit", self.cmd_find_next)  # Enter / ↓ in find bar
+        # F3 is the near-universal "next match" key, and it works from the text:
+        # stepping through hits used to require keeping the find bar focused.
+        add("find_next", "Find Next", "Edit", self.cmd_find_next, "f3")
         add("find_prev", "Find Previous", "Edit", self.cmd_find_prev)  # ↑ in find bar
         add("replace_one", "Replace", "Edit", self.cmd_replace_one)  # Enter in replace field
         add("replace_all", "Replace All", "Edit", self.cmd_replace_all)  # menu + bar buttons

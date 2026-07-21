@@ -42,12 +42,13 @@ Every command is a single keystroke — no two-key chords, anywhere. Anything wi
 | **Ctrl+K** | StarBot AI panel |
 | **Ctrl+G** / **F7** | Suggest spelling correction / toggle spellcheck |
 | **F1** | Keyboard reference (every command, generated from the code) |
+| **F3** | Find next — works from the text, no need to reopen the find bar |
 | **F4** | Outline — jump to any Markdown heading |
 | **F5** | Export to HTML / DOCX / PDF / EPUB (DOCX and PDF need pandoc) |
 | **Ctrl+Home / Ctrl+End** | Start / end of the document |
 | **Ctrl+←/→** | Word hop |
 | **Ctrl+↑/↓** | Paragraph hop |
-| **Ctrl+PageUp/PageDown** | Previous / next tab |
+| **Ctrl+PageUp/PageDown** | Previous / next tab (see the note below) |
 
 Inside the find bar: **Ctrl+T** toggles match-case, **Ctrl+L** replaces all, **Ctrl+R** expands to replace. With the project panel focused, **Ctrl+F** searches every file in the project.
 
@@ -55,6 +56,11 @@ Menu-only (no key): Open Folder, Close Others, Close All, Save As, Save All, Com
 
 Launching with no file shows a task launcher: **Recent Files / Projects / New**, arrow through and press Enter. If you had files open last time, the first row offers them all back, carets included. Open files from the CLI too (`markstar chapter.md`). Soft wrap on. The status strip counts *prose* — Markdown syntax, code blocks, link URLs and comments don't inflate the total — and shows the selection's count when you have one. Line numbers are an optional faint gutter (View → Line Numbers).  
 Avoid Alt (terminals steal it) and Ctrl+M (same as Enter).
+
+> **Tab switching in GNOME Terminal / other VTE terminals:** `Ctrl+PageUp` and
+> `Ctrl+PageDown` are bound by the terminal itself to switch *its* tabs, so they
+> never reach MarkStar. Either rebind them in the terminal's preferences, or use
+> View → Next Tab / Previous Tab from the `F9` menu.
 
 ```bash
 pytest
