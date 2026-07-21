@@ -33,7 +33,9 @@
 ### Commands — one keystroke each
 | Key | Action |
 |-----|--------|
-| `Ctrl+N` / `Ctrl+O` / `Ctrl+W` | New / Open / Close file |
+| `Ctrl+N` | New file |
+| `Ctrl+O` | **Quick Open** — fuzzy-search recents + the project (§7) |
+| `Ctrl+W` | Close tab (asks about unsaved changes — §7) |
 | `Ctrl+S` | Save |
 | `Ctrl+Q` | **Quit** (restored — no longer a prefix) |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
@@ -42,6 +44,10 @@
 | `Ctrl+A` | Select all |
 | `Ctrl+B` | **Bold** — wraps selection in `**…**` |
 | `Ctrl+E` | **Emphasis / italic** — wraps selection in `*…*` (`Ctrl+I` is impossible — it's Tab; "E for emphasis" = HTML/Markdown's real name for italic, `<em>`) |
+| `Ctrl+P` | **Project panel** — open+focus / focus / close (§7) |
+| `Ctrl+K` | StarBot AI panel |
+| `Ctrl+G` | Suggest spelling correction |
+| `F7` | Toggle spellcheck |
 | `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous tab |
 | `Esc` / `F9` | Open menu ribbon |
 
@@ -105,6 +111,46 @@ Deferred (not now): a read-only full-render toggle (Textual `Markdown` widget), 
 - **Find next/prev** → `↓`/`Enter` and `↑` while the find bar is focused (replaces the old `Ctrl+Enter` prev and any F-keys).
 - Footer hints + menu shortcut column advertise only the portable single keys.
 - Tests stay green (command/domain layer unchanged); add Format-menu Markdown-insertion tests.
+
+---
+
+## 7. File lifecycle (v0.3 — the Works-95 layer)
+
+The pieces Baron called "clunky and nonintuitive." All single-stroke, no chords.
+
+### Splash / task launcher
+Launching with no file shows the logo over a Works-style tabbed launcher:
+
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Switch tab — **Recent Files** · **Projects** · **New** |
+| `↑` / `↓` · `Enter` | Choose and open |
+| `N` | New blank document |
+| `O` | Quick Open (a file not on the list) |
+| `Esc` | Blank document, no fuss |
+
+Recent Files leads because reopening yesterday's chapter is the common case. Nothing needs typing; the folder path field survives only inside the Projects tab, behind "Open another folder…". Opening a recent file also points the project panel at that file's project — the deepest recent project containing it, else its own folder.
+
+### Quick Open (`Ctrl+O`)
+Type a fragment, get the file. Recents rank first, then everything openable under the project root (`.git`, `node_modules`, and hidden folders are skipped; the walk is capped so a huge tree can't hang the editor). Matching is subsequence-based: `ch3` finds `chapter-3.md`. Starting the line with `/`, `~`, `./` or `../` switches to a literal path field with `Tab` completion — the escape hatch for files outside the project. A typed path that doesn't exist yet still opens an empty buffer; that's how you create a file. A *listed* file that has since moved says so and drops off the list.
+
+### Closing (`Ctrl+W`) and quitting (`Ctrl+Q`)
+Dirty buffers are never discarded silently. Both show:
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `S` | Save |
+| `D` | Don't save (also deletes the autosave sidecar — discarded means gone) |
+| `A` | Save all — quit only |
+| `Esc` | Cancel, and cancel the whole operation |
+
+Quit walks the dirty buffers one at a time, making each visible before asking. Cancelling anywhere — including at the Save As prompt for an untitled buffer — aborts the entire quit and puts you back where you started.
+
+### Save paths
+Typed relative paths and the default name for an untitled buffer resolve against the **project root** if one is open, else the **active file's folder**, else the working directory. Previously everything resolved against wherever the process happened to be launched from, which is why files landed in surprising places.
+
+### Project panel (`Ctrl+P`)
+One key, three states: closed → open **and focus the tree**; open but you're typing → **focus the tree**; open and focused → close and return to the editor. (It used to close the panel you were trying to reach.) Taking focus reloads the tree, so files created outside MarkStar show up. Switching tabs or opening a file reveals it in the tree — expanding folders and scrolling to it.
 
 ---
 

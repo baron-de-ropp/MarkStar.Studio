@@ -21,33 +21,30 @@ pytest
 
 ### Keys (P0–P1)
 
+Every command is a single keystroke — no two-key chords, anywhere. Anything without a key lives in the menu (**F9** or **Esc**).
+
 | Key | Action |
 |-----|--------|
-| **F9** | Open the **menu ribbon** (File Edit View…); ←/→ switch, Enter run, Esc close |
-| **Ctrl+Shift+.** / **Ctrl+Shift+,** | Next / previous tab (`>` / `<` keys; across open files) |
-| **Ctrl+N** / **Ctrl+W** | New tab / close tab |
+| **F9** / **Esc** | Open the **menu ribbon** (File Edit View Format Tools Project Help); ←/→ switch, Enter run, Esc close |
+| **Ctrl+N** | New file |
+| **Ctrl+O** | **Quick Open** — type a fragment to fuzzy-match recents + project files; `/` `~` `./` switches to a literal path with Tab-completion |
+| **Ctrl+W** | Close tab — asks Save / Don't Save / Cancel if there are unsaved changes |
+| **Ctrl+S** | Save (prompts for a path if the buffer is untitled) |
+| **Ctrl+Q** | Quit — walks each unsaved buffer; `A` saves all, `Esc` cancels the quit |
+| **Ctrl+Z** / **Ctrl+Y** | Undo / Redo |
+| **Ctrl+F** / **Ctrl+R** | Find / Replace (Enter next or replace-one; ↑ prev; **Ctrl+L** replace all) |
+| **Ctrl+A** | Select all |
+| **Ctrl+B** / **Ctrl+E** | Bold / italic (`Ctrl+I` is Tab in a terminal, so italic is "E for emphasis") |
+| **Ctrl+P** | Project panel — open+focus, focus, then close |
+| **Ctrl+K** | StarBot AI panel |
+| **Ctrl+G** / **F7** | Suggest spelling correction / toggle spellcheck |
 | **Ctrl+←/→** | Word hop |
 | **Ctrl+↑/↓** | Paragraph hop |
-| **Ctrl+Shift+↑/↓** | Move line |
-| **Ctrl+Shift+D** | Duplicate line |
-| Ctrl+S | Save |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / Redo |
-| Ctrl+F / Ctrl+R | Find / Replace (Enter next or replace-one; Ctrl+Enter prev; **Ctrl+Shift+Enter** all) |
-| Ctrl+O | Open path (prompt) |
-| Ctrl+S / Ctrl+Shift+S | Save / Save As (overwrite confirm if file exists) |
-| Ctrl+Shift+A | Save all dirty tabs |
-| Ctrl+W | Close active tab |
-| Esc | Open / close menu (F9 still works) |
-| Esc → File → Close Others / Close All | Menu only (no key — terminals steal the usual chords) |
-| Ctrl+G | Go to line |
-| Ctrl+A | Select all |
-| Ctrl+Shift+L | Toggle soft wrap |
-| Ctrl+Q | Quit |
+| **Ctrl+PageUp/PageDown** | Previous / next tab |
 
-Open files from the CLI (`markstar chapter.md`). Soft wrap on; status shows word count.
+Menu-only (no key): Open Folder, Close Others, Close All, Save As, Save All, Compile, Duplicate Line, Move Line Up/Down, most Format commands, Soft Wrap, Zen Mode, Theme.
 
-**Menus:** Press **F9**.  
-`Ctrl+Shift+P` is optional and often stolen by the host terminal/IDE before Prose receives it.  
+Launching with no file shows a task launcher: **Recent Files / Projects / New**, arrow through and press Enter. Open files from the CLI too (`markstar chapter.md`). Soft wrap on; status shows word count.  
 Avoid Alt (terminals steal it) and Ctrl+M (same as Enter).
 
 ```bash

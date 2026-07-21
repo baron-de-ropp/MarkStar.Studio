@@ -82,3 +82,20 @@ def test_app_applies_saved_prefs(tmp_path, monkeypatch) -> None:
     assert theme == "markstar-light"
     assert formatting is False
     assert wrap is False
+
+
+def test_recent_files_round_trip_and_cap(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "config.toml"))
+    from markstar.config import RECENT_FILES_MAX
+
+    files = [str(tmp_path / f"f{i}.md") for i in range(RECENT_FILES_MAX + 5)]
+    Preferences(recent_files=files).save()
+
+    loaded = Preferences.load().recent_files
+    assert len(loaded) == RECENT_FILES_MAX          # over-long list is trimmed
+    assert loaded == files[:RECENT_FILES_MAX]        # order preserved
+
+
+def test_recent_files_defaults_to_empty(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "missing.toml"))
+    assert Preferences.load().recent_files == []

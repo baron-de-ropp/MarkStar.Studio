@@ -21,8 +21,10 @@ from textual.widgets.text_area import Selection
 
 from markstar import __version__
 from markstar.commands.registry import Command, CommandRegistry
-from markstar.config import Preferences
+from markstar.config import RECENT_FILES_MAX, RECENT_PROJECTS_MAX, Preferences
 from markstar.domain.document import Document
+from markstar.domain.recent import prune_missing, push_recent
+from markstar.domain.savepath import resolve_save_path
 from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
 from markstar.domain.autosave import (
     delete_sidecar,
@@ -44,7 +46,13 @@ from markstar.domain.markdown import (
 )
 from markstar.domain.spellcheck import Speller
 from markstar.domain.workspace import Workspace
-from markstar.ui.dialogs import ConfirmDialog, PathPrompt, RestoreDialog
+from markstar.ui.dialogs import (
+    ConfirmDialog,
+    PathPrompt,
+    RestoreDialog,
+    SaveChangesDialog,
+)
+from markstar.ui.quick_open import QuickOpenScreen
 from markstar.ui.edit_card import EditCard
 from markstar.ui.editor_session import EditorSession
 from markstar.ui.layout import PANEL_GAP, ProseLayout, compute_layout
@@ -638,15 +646,101 @@ class MarkStarApp(App[None]):
         return Path.cwd()
 
     def _record_recent_project(self, root: Path) -> None:
-        """Push a folder to the front of the recent-projects list (max 5)."""
-        try:
-            key = str(Path(root).expanduser().resolve())
-        except Exception:
-            return
-        recents = [x for x in self.prefs.recent_projects if x != key]
-        recents.insert(0, key)
-        self.prefs.recent_projects = recents[:5]
+        """Push a folder to the front of the recent-projects list."""
+        self.prefs.recent_projects = push_recent(
+            self.prefs.recent_projects, root, RECENT_PROJECTS_MAX
+        )
         self.prefs.save()
+
+    def _record_recent_file(self, path: Path) -> None:
+        """Push a document to the front of the recent-files list."""
+        self.prefs.recent_files = push_recent(
+            self.prefs.recent_files, path, RECENT_FILES_MAX
+        )
+        self.prefs.save()
+
+    def _recent_files(self) -> list[str]:
+        """Recent documents that still exist, pruning any that don't.
+
+        Pruning at read (rather than on a filesystem watch) keeps the list
+        honest without any background work: a renamed file simply stops being
+        offered the next time something asks.
+        """
+        kept = prune_missing(self.prefs.recent_files)
+        if kept != self.prefs.recent_files:
+            self.prefs.recent_files = kept
+            self.prefs.save()
+        return kept
+
+    def _infer_project_root(self, path: Path) -> Path:
+        """Best project folder for a file: its deepest known recent project.
+
+        Mirrors what ``markstar <folder>/file.md`` already does — open the file
+        and point the panel somewhere useful — but prefers a project the writer
+        has actually opened over the file's bare parent directory.
+        """
+        try:
+            target = path.expanduser().resolve()
+        except OSError:
+            return path.parent
+        best: Path | None = None
+        for entry in self.prefs.recent_projects:
+            candidate = Path(entry)
+            if candidate == target or candidate in target.parents:
+                if best is None or len(candidate.parts) > len(best.parts):
+                    best = candidate
+        return best if best is not None else target.parent
+
+    def _open_doc(self, path: Path, *, must_exist: bool = False) -> bool:
+        """Open ``path`` in a tab. The single open path for every caller.
+
+        ``must_exist`` guards opens sourced from a remembered list: a file that
+        has since moved should say so and drop out of the list, not silently
+        become an empty buffer bound to a dead path. Typed paths keep the
+        opposite behavior on purpose — naming a file that isn't there yet is how
+        you create one.
+        """
+        if must_exist and not path.is_file():
+            self.notify(f"{path.name} is no longer there", severity="warning")
+            self.prefs.recent_files = [
+                x for x in self.prefs.recent_files if Path(x) != path
+            ]
+            self.prefs.save()
+            return False
+        self._sync_document_from_editor()
+        try:
+            self.workspace.open_path(path)
+        except OSError as exc:
+            self.notify(f"Open failed: {exc}", severity="error")
+            return False
+        self._find.reset()
+        self._load_active_into_editor()
+        self._refresh_status()
+        try:
+            self.query_one("#editor", TextArea).focus()
+        except Exception:
+            pass
+        if path.exists():
+            self._record_recent_file(path)
+            self.notify(f"Opened {path.name}")
+        else:
+            self.notify(f"New buffer for {path} (not on disk yet)")
+        self._reveal_active_file()
+        self.run_worker(self._maybe_restore(path))
+        return True
+
+    def _save_base_dir(self) -> Path:
+        """Where a typed relative path lands: project root → file's folder → cwd."""
+        if self._path_arg is not None:
+            return self._project_root()
+        doc_path = self.workspace.active.path
+        if doc_path is not None:
+            return doc_path.parent
+        return Path.cwd()
+
+    def _untitled_default(self) -> Path:
+        """Default path offered when saving a buffer that has never had one."""
+        return self._save_base_dir() / f"untitled{_DEFAULT_SUFFIX}"
 
     def _set_project_root(self, root: Path, *, focus_tree: bool = True) -> None:
         """Point the panel at ``root``, open it, and record it as recent."""
@@ -1079,6 +1173,24 @@ class MarkStarApp(App[None]):
         self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
+        self._reveal_active_file()
+
+    def _reveal_active_file(self) -> None:
+        """Point the project tree at whatever file is now in the editor.
+
+        Fire-and-forget: revealing is a courtesy, and a file outside the project
+        (or a tree still loading) simply doesn't get one.
+        """
+        path = self.workspace.active.path
+        if path is None:
+            return
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+        except Exception:
+            return
+        if not panel.is_open:
+            return
+        self.run_worker(panel.reveal(path), exclusive=True, group="reveal")
 
     def _cursor_index(self) -> int:
         editor = self.query_one("#editor", TextArea)
@@ -1385,68 +1497,57 @@ class MarkStarApp(App[None]):
             except OSError as exc:
                 self.notify(f"Create failed: {exc}", severity="error")
                 return
-        self._sync_document_from_editor()
-        try:
-            self.workspace.open_path(path)
-        except OSError as exc:
-            self.notify(f"Open failed: {exc}", severity="error")
+        if not self._open_doc(path):
             return
-        self._find.reset()
-        self._load_active_into_editor()
-        self._refresh_status()
         panel.refresh_tree()
-        self.query_one("#editor", TextArea).focus()
         if not existed:
             self.notify(f"Created {path.name}")
 
     def cmd_open_file(self) -> None:
-        """Open a path via prompt (file dialog later)."""
-        self.run_worker(self._open_file_async())
+        """Quick Open — fuzzy-match recents and the project tree (Ctrl+O)."""
+        self.run_worker(self._quick_open_async())
 
     def action_open_file(self) -> None:
         self.cmd_open_file()
 
-    async def _open_file_async(self) -> None:
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                "Open — enter a file path",
-                initial=str(Path.cwd()) + "/",
-                hint="Enter open · Esc cancel · ~ allowed · missing path creates empty tab",
-            )
+    async def _quick_open_async(self) -> None:
+        recents = self._recent_files()
+        root = self._project_root() if self._path_arg is not None else None
+        picked = await self.push_screen_wait(QuickOpenScreen(recents, root))
+        if picked is None:
+            return
+        # A row the writer picked from the list must still be there; a path they
+        # typed themselves may legitimately not be.
+        from_list = str(picked) in recents or (
+            root is not None and picked.is_relative_to(root) and picked.exists()
         )
-        if raw is None:
-            return
-        path = self._normalize_save_path(raw)
-        if path is None:
-            self.notify("Empty path — nothing opened", severity="warning")
-            return
-        self._sync_document_from_editor()
-        try:
-            self.workspace.open_path(path)
-        except OSError as exc:
-            self.notify(f"Open failed: {exc}", severity="error")
-            return
-        self._find.reset()
-        self._load_active_into_editor()
-        self._refresh_status()
-        if path.exists():
-            self.notify(f"Opened {path}")
-        else:
-            self.notify(f"New buffer for {path} (not on disk yet)")
-        await self._maybe_restore(path)
+        self._open_doc(picked, must_exist=from_list)
 
     def cmd_toggle_project_panel(self) -> None:
-        """Show/hide the left project-file overlay."""
+        """Ctrl+P — reach the panel, then leave it. Three states, one key.
+
+        Closed → open it and put the cursor in the tree. Open but you're typing
+        → jump focus to the tree (this used to close the very panel you were
+        reaching for). Open and already focused → close and go back to writing.
+        """
         try:
             panel = self.query_one("#project-panel", ProjectPanel)
         except Exception:
             return
-        if panel.is_open:
+        if not panel.is_open:
+            panel.open()
+            panel.refresh_tree()  # catch anything added since it was last shown
+            panel.focus_tree()
+            self._reveal_active_file()
+        elif not panel.has_focus_within:
+            # Taking focus is the natural moment to notice files that appeared
+            # (or vanished) outside MarkStar since you last looked.
+            panel.refresh_tree()
+            panel.focus_tree()
+            self._reveal_active_file()
+        else:
             panel.close()
             self.query_one("#editor", TextArea).focus()
-        else:
-            panel.open()
-            panel.focus_tree()
         self._update_prose_layout()  # prose re-centers clear of the panel
 
     def action_toggle_project(self) -> None:
@@ -1458,9 +1559,31 @@ class MarkStarApp(App[None]):
 
     async def _show_welcome(self) -> None:
         recent = [Path(p) for p in self.prefs.recent_projects]
-        root = await self.push_screen_wait(
-            WelcomeScreen(self._project_root(), __version__, recent)
+        files: list[tuple[Path, float]] = []
+        for entry in self._recent_files():
+            p = Path(entry)
+            try:
+                files.append((p, p.stat().st_mtime))
+            except OSError:
+                continue
+        choice = await self.push_screen_wait(
+            WelcomeScreen(self._project_root(), __version__, recent, files)
         )
+        if choice is None or choice.kind == "new":
+            return  # blank buffer, already waiting behind the modal
+        if choice.kind == "quick_open":
+            await self._quick_open_async()
+            return
+        if choice.kind == "file" and choice.path is not None:
+            # Point the panel at the file's project so the tree is useful, the
+            # same way `markstar <folder>/file.md` already behaves.
+            self._set_project_root(
+                self._infer_project_root(choice.path), focus_tree=False
+            )
+            self._open_doc(choice.path, must_exist=True)
+            return
+
+        root = choice.path
         if root is None:
             return
         if root.is_dir():
@@ -1522,65 +1645,113 @@ class MarkStarApp(App[None]):
                 severity="warning",
             )
             return
-        self._sync_document_from_editor()
-        try:
-            self.workspace.open_path(path)
-        except OSError as exc:
-            self.notify(f"Open failed: {exc}", severity="error")
-            return
-        self._find.reset()
-        self._load_active_into_editor()
-        self._refresh_status()
-        self.query_one("#editor", TextArea).focus()
-        self.notify(f"Opened {path.name}")
-        self.run_worker(self._maybe_restore(path))
+        self._open_doc(path)
+
+    @staticmethod
+    def _doc_name(doc: Document) -> str:
+        return doc.path.name if doc.path else "Untitled"
+
+    async def _resolve_dirty(
+        self, indices: list[int], *, allow_save_all: bool
+    ) -> bool:
+        """Ask about each dirty buffer in ``indices``. False = the writer cancelled.
+
+        Decides only — closing is left to the caller, so the workspace's
+        "always at least one tab" invariant stays in one place. Each buffer is
+        made active before its dialog so the writer is looking at the thing
+        they're deciding about.
+        """
+        save_all = False
+        for i in indices:
+            if i >= self.workspace.count:
+                continue
+            doc = self.workspace.documents[i]
+            if not doc.dirty:
+                continue
+
+            if save_all and doc.path is not None:
+                try:
+                    doc.save()
+                    delete_sidecar(doc.path)
+                except OSError as exc:
+                    self.notify(
+                        f"Save failed ({doc.path.name}): {exc}", severity="error"
+                    )
+                    return False
+                continue
+
+            self.workspace.set_active(i)
+            self._load_active_into_editor()
+            self._refresh_status()
+            answer = await self.push_screen_wait(
+                SaveChangesDialog(
+                    self._doc_name(doc), show_save_all=allow_save_all
+                )
+            )
+            if answer == "cancel" or answer is None:
+                return False
+            if answer == "save_all":
+                save_all = True
+                answer = "save"
+            if answer == "discard":
+                # Explicitly thrown away — drop the crash sidecar too, or it
+                # would offer this work back on the next open.
+                if doc.path is not None:
+                    delete_sidecar(doc.path)
+                continue
+            # "save"
+            if doc.path is None:
+                ok = await self._prompt_and_save_async(
+                    title=f'Save "{self._doc_name(doc)}" — where?',
+                    initial=str(self._untitled_default()),
+                )
+            else:
+                ok = self._write_active_document()
+            if not ok:
+                return False  # cancelled or failed → abort the whole operation
+        return True
 
     def cmd_close(self) -> None:
-        was_dirty = self.document.dirty
+        self.run_worker(self._close_active_async())
+
+    async def _close_active_async(self) -> None:
+        self._sync_document_from_editor()
+        if self.workspace.active.dirty:
+            if not await self._resolve_dirty(
+                [self.workspace.active_index], allow_save_all=False
+            ):
+                return
         self.workspace.close_active()
         self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
-        if was_dirty:
-            self.notify("Closed tab (unsaved buffer discarded)", severity="warning")
 
     def cmd_close_others(self) -> None:
-        """Close every tab except the active one. Confirm if others are dirty."""
+        """Close every tab except the active one, asking about each dirty one."""
+        self.run_worker(self._close_others_async())
+
+    async def _close_others_async(self) -> None:
         self._sync_document_from_editor()
         if self.workspace.count <= 1:
             self.notify("No other tabs to close")
             return
-
-        others_dirty = [
-            doc
+        keep = self.workspace.active
+        others = [
+            i
             for i, doc in enumerate(self.workspace.documents)
-            if i != self.workspace.active_index and doc.dirty
+            if doc is not keep and doc.dirty
         ]
-        if not others_dirty:
-            self._do_close_others()
+        if others and not await self._resolve_dirty(others, allow_save_all=False):
             return
-
-        names = [doc.path.name if doc.path else "Untitled" for doc in others_dirty]
-        listed = ", ".join(names[:4]) + ("…" if len(names) > 4 else "")
-        detail = (
-            f"{len(names)} other tab(s) have unsaved changes ({listed})."
-            if len(names) > 1
-            else f'"{names[0]}" has unsaved changes.'
-        )
-
-        async def _confirm() -> None:
-            ok = await self.push_screen_wait(
-                ConfirmDialog(
-                    title="Close other tabs?",
-                    message=detail + "\nClose others and discard their unsaved work?",
-                    yes_label="close others",
-                    no_label="stay",
-                )
-            )
-            if ok:
-                self._do_close_others()
-
-        self.run_worker(_confirm())
+        # The walk moved the active tab around. Put it back AND reload the
+        # editor — _do_close_others syncs the editor into the active document
+        # first, so a stale buffer here would overwrite the tab we're keeping.
+        for i, doc in enumerate(self.workspace.documents):
+            if doc is keep:
+                self.workspace.set_active(i)
+                self._load_active_into_editor()
+                break
+        self._do_close_others()
 
     def action_close_others(self) -> None:
         self.cmd_close_others()
@@ -1595,32 +1766,15 @@ class MarkStarApp(App[None]):
         self.notify(f"Closed {closed} other tab(s)")
 
     def cmd_close_all(self) -> None:
-        """Close every tab (leave one empty). Menu-only; confirm if dirty."""
-        dirty = self._unsaved_documents()
-        if not dirty:
-            self._do_close_all()
+        """Close every tab (leave one empty), asking about each dirty one."""
+        self.run_worker(self._close_all_async())
+
+    async def _close_all_async(self) -> None:
+        self._sync_document_from_editor()
+        dirty = [i for i, doc in enumerate(self.workspace.documents) if doc.dirty]
+        if dirty and not await self._resolve_dirty(dirty, allow_save_all=True):
             return
-
-        names = [doc.path.name if doc.path else "Untitled" for doc in dirty]
-        if len(names) == 1:
-            detail = f'"{names[0]}" has unsaved changes.'
-        else:
-            listed = ", ".join(names[:4]) + ("…" if len(names) > 4 else "")
-            detail = f"{len(names)} tabs have unsaved changes ({listed})."
-
-        async def _confirm() -> None:
-            ok = await self.push_screen_wait(
-                ConfirmDialog(
-                    title="Close all tabs?",
-                    message=detail + "\nClose all and discard unsaved work?",
-                    yes_label="close all",
-                    no_label="stay",
-                )
-            )
-            if ok:
-                self._do_close_all()
-
-        self.run_worker(_confirm())
+        self._do_close_all()
 
     def _do_close_all(self) -> None:
         self._sync_document_from_editor()
@@ -1678,7 +1832,7 @@ class MarkStarApp(App[None]):
             self._refresh_status()
             ok = await self._prompt_and_save_async(
                 title=f"Save All — name for untitled tab {i + 1}",
-                initial=str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
+                initial=str(self._untitled_default()),
             )
             if ok:
                 saved += 1
@@ -1714,7 +1868,7 @@ class MarkStarApp(App[None]):
             self.run_worker(
                 self._prompt_and_save_async(
                     title="Save — where should this file go?",
-                    initial=str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
+                    initial=str(self._untitled_default()),
                 )
             )
             return
@@ -1725,7 +1879,7 @@ class MarkStarApp(App[None]):
         initial = (
             str(self.document.path)
             if self.document.path is not None
-            else str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}")
+            else str(self._untitled_default())
         )
         self.run_worker(
             self._prompt_and_save_async(
@@ -1744,6 +1898,8 @@ class MarkStarApp(App[None]):
             # Explicit save → the sidecar is now stale; remove it.
             if self.document.path is not None:
                 delete_sidecar(self.document.path)
+                if path is not None:  # named by the writer → worth remembering
+                    self._record_recent_file(self.document.path)
             self.notify(f"Saved {self.document.path}")
             self._refresh_status()
             return True
@@ -1763,7 +1919,7 @@ class MarkStarApp(App[None]):
         raw = await self.push_screen_wait(
             PathPrompt(
                 title,
-                initial=initial or str(Path.cwd() / f"untitled{_DEFAULT_SUFFIX}"),
+                initial=initial or str(self._untitled_default()),
                 hint="Enter path · Enter save · Esc cancel · ~ allowed",
             )
         )
@@ -1798,18 +1954,9 @@ class MarkStarApp(App[None]):
 
         return self._write_active_document(path)
 
-    @staticmethod
-    def _normalize_save_path(raw: str) -> Path | None:
-        text = raw.strip().strip('"').strip("'")
-        if not text:
-            return None
-        path = Path(text).expanduser()
-        if not path.is_absolute():
-            path = Path.cwd() / path
-        # Default extension for bare names
-        if path.suffix == "":
-            path = path.with_suffix(_DEFAULT_SUFFIX)
-        return path
+    def _normalize_save_path(self, raw: str) -> Path | None:
+        """Expand typed path text against the right base folder (see savepath)."""
+        return resolve_save_path(raw, self._save_base_dir(), _DEFAULT_SUFFIX)
 
     def action_quit(self) -> None:
         """Override Textual's default action_quit (Ctrl+Q) so we can confirm dirty tabs.
@@ -1819,41 +1966,25 @@ class MarkStarApp(App[None]):
         """
         self.cmd_quit()
 
-    def _unsaved_documents(self) -> list[Document]:
-        """Dirty workspace buffers, after syncing the focused editor into the active doc."""
-        self._sync_document_from_editor()
-        return self.workspace.dirty_documents()
-
     def cmd_quit(self) -> None:
-        dirty = self._unsaved_documents()
+        self.run_worker(self._quit_async())
+
+    async def _quit_async(self) -> None:
+        self._sync_document_from_editor()
+        dirty = [i for i, doc in enumerate(self.workspace.documents) if doc.dirty]
         if not dirty:
             self.exit()
             return
-
-        names: list[str] = []
-        for doc in dirty:
-            names.append(doc.path.name if doc.path else "Untitled")
-        if len(names) == 1:
-            detail = f'"{names[0]}" has unsaved changes.'
-        else:
-            listed = ", ".join(names[:4])
-            if len(names) > 4:
-                listed += "…"
-            detail = f"{len(names)} tabs have unsaved changes ({listed})."
-
-        async def _confirm() -> None:
-            ok = await self.push_screen_wait(
-                ConfirmDialog(
-                    title="Quit MarkStar?",
-                    message=detail + "\nQuit anyway and discard unsaved work?",
-                    yes_label="quit",
-                    no_label="stay",
-                )
-            )
-            if ok:
-                self.exit()
-
-        self.run_worker(_confirm())
+        resume = self.workspace.active_index
+        if not await self._resolve_dirty(dirty, allow_save_all=True):
+            # Cancelled mid-walk: leave the writer where they started.
+            if resume < self.workspace.count:
+                self.workspace.set_active(resume)
+                self._load_active_into_editor()
+                self._refresh_status()
+            self.notify("Quit cancelled")
+            return
+        self.exit()
 
     def cmd_undo(self) -> None:
         if self.document.undo():

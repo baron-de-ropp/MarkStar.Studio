@@ -8,6 +8,7 @@ posts ``FileSelected``, which the app opens in a tab.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from rich.style import Style
@@ -17,19 +18,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import DirectoryTree
 
+from markstar.domain.filewalk import MARKDOWN_EXTS, is_openable  # noqa: F401 (re-export)
 from markstar.ui.themes import token
-
-# Files MarkStar can open/edit as documents. Everything else (images, PDFs,
-# binaries, source files) still shows in the tree as a link/embed target, but is
-# rendered fainter and can't be opened in an editor tab.
-MARKDOWN_EXTS = frozenset(
-    {".md", ".markdown", ".mdown", ".mkd", ".mdx", ".mdtext", ".txt"}
-)
-
-
-def is_openable(path) -> bool:
-    """True if ``path`` is a Markdown/plain-text document MarkStar can edit."""
-    return Path(path).suffix.lower() in MARKDOWN_EXTS
 
 
 class WriterTree(DirectoryTree):
@@ -84,6 +74,49 @@ class WriterTree(DirectoryTree):
                 p.name.lower(),             # alphabetical within each group
             ),
         )
+
+    @staticmethod
+    def _child_named(node, name: str):
+        for child in node.children:
+            path = getattr(getattr(child, "data", None), "path", None)
+            if path is not None and Path(path).name == name:
+                return child
+        return None
+
+    async def reveal_path(self, target: Path, *, ticks: int = 40) -> bool:
+        """Expand down to ``target`` and park the cursor on it.
+
+        Children load in a background thread, so each level is polled until it
+        populates rather than assumed present. Moves the cursor rather than
+        selecting: selecting a file posts ``FileSelected``, which the app would
+        answer by opening the file we are merely trying to point at.
+        """
+        try:
+            root = Path(self.path).expanduser().resolve()
+            target = Path(target).expanduser().resolve()
+            rel = target.relative_to(root)
+        except (ValueError, OSError):
+            return False  # outside the project — nothing to reveal
+
+        node = self.root
+        for part in rel.parts:
+            if not node.is_expanded:
+                node.expand()
+            child = None
+            for _ in range(ticks):
+                child = self._child_named(node, part)
+                if child is not None:
+                    break
+                await asyncio.sleep(0.02)
+            if child is None:
+                return False
+            node = child
+        try:
+            self.move_cursor(node)
+            self.scroll_to_node(node)
+        except Exception:
+            return False
+        return True
 
     def render_label(self, node, base_style: Style, style: Style) -> Text:
         label = super().render_label(node, base_style, style)
@@ -251,3 +284,12 @@ class ProjectPanel(Vertical):
             self.query_one(WriterTree).reload()
         except Exception:
             pass
+
+    async def reveal(self, path: Path) -> bool:
+        """Point the tree at ``path`` (no-op when the panel is closed)."""
+        if not self.is_open:
+            return False
+        try:
+            return await self.query_one(WriterTree).reveal_path(path)
+        except Exception:
+            return False

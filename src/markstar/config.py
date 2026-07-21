@@ -23,6 +23,11 @@ from markstar.ui.themes import DEFAULT_THEME_NAME, THEME_NAMES
 
 MOUSE_CHOICES = ("auto", "on", "off")
 
+# MRU caps. Projects are a coarse, slow-moving list; files churn fast, so the
+# welcome screen's file tab is worth a deeper history.
+RECENT_PROJECTS_MAX = 5
+RECENT_FILES_MAX = 15
+
 
 def _clamp_int(value, default: int, lo: int, hi: int) -> int:
     """Return value if it's an int within [lo, hi], else the default."""
@@ -62,6 +67,7 @@ class Preferences:
     autosave: bool = True  # debounced crash-safety sidecars
     autosave_ms: int = 1500  # debounce delay
     recent_projects: list = field(default_factory=list)  # last folders (max 5)
+    recent_files: list = field(default_factory=list)  # last documents (max 15)
     spell_added: list = field(default_factory=list)  # personal dictionary
 
     @classmethod
@@ -94,7 +100,14 @@ class Preferences:
             prefs.autosave = data["autosave"]
         rp = data.get("recent_projects")
         if isinstance(rp, list):
-            prefs.recent_projects = [str(x) for x in rp if isinstance(x, str)][:5]
+            prefs.recent_projects = [
+                str(x) for x in rp if isinstance(x, str)
+            ][:RECENT_PROJECTS_MAX]
+        rf = data.get("recent_files")
+        if isinstance(rf, list):
+            prefs.recent_files = [
+                str(x) for x in rf if isinstance(x, str)
+            ][:RECENT_FILES_MAX]
         sa = data.get("spell_added")
         if isinstance(sa, list):
             prefs.spell_added = [str(x) for x in sa if isinstance(x, str)]

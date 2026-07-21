@@ -8,7 +8,13 @@ from unittest.mock import AsyncMock, patch
 from markstar import __version__
 from markstar.app import MarkStarApp
 from markstar.ui.project_panel import ProjectPanel
-from markstar.ui.welcome import WelcomeScreen, _LOGO_MIN_WIDTH
+from markstar.ui.welcome import (
+    TAB_FILES,
+    TAB_PROJECTS,
+    WelcomeChoice,
+    WelcomeScreen,
+    _LOGO_MIN_WIDTH,
+)
 
 
 def _run(coro):
@@ -75,7 +81,9 @@ def test_choosing_folder_sets_project_root(tmp_path) -> None:
         app = MarkStarApp()
         async with app.run_test() as pilot:
             with patch.object(
-                app, "push_screen_wait", AsyncMock(return_value=tmp_path)
+                app,
+                "push_screen_wait",
+                AsyncMock(return_value=WelcomeChoice("folder", tmp_path)),
             ):
                 await app._show_welcome()
             await pilot.pause()
@@ -140,7 +148,9 @@ def test_nonexistent_folder_offers_to_create(tmp_path) -> None:
         async with app.run_test() as pilot:
             # welcome returns the missing path; then the confirm dialog says yes.
             with patch.object(
-                app, "push_screen_wait", AsyncMock(side_effect=[new_dir, True])
+                app,
+                "push_screen_wait",
+                AsyncMock(side_effect=[WelcomeChoice("folder", new_dir), True]),
             ):
                 await app._show_welcome()
             await pilot.pause()
@@ -160,7 +170,9 @@ def test_declining_create_leaves_no_folder(tmp_path) -> None:
         app = MarkStarApp()
         async with app.run_test() as pilot:
             with patch.object(
-                app, "push_screen_wait", AsyncMock(side_effect=[new_dir, False])
+                app,
+                "push_screen_wait",
+                AsyncMock(side_effect=[WelcomeChoice("folder", new_dir), False]),
             ):
                 await app._show_welcome()
             await pilot.pause()
