@@ -21,3 +21,8 @@ untitled*.md
 __pycache__/
 *.egg-info/
 *.spec
+
+# Research sources: large re-fetchable binaries stay on disk, out of git history.
+# Re-fetch URLs are recorded in docs/research/*-reference.md.
+docs/research/sources/*.pdf
+docs/research/sources/*.html

@@ -1,0 +1,9 @@
+Comments = Microsoft Works for Windows
+CompanyName = Microsoft Corporation
+FileDescription = Microsoft Works for Windows
+FileVersion = 4.00.03.442
+InternalName = MSWorks
+LegalCopyright = Copyright© 1987-1995 Microsoft Corp.  All rights reserved.
+OriginalFilename = MSWORKS.EXE
+ProductName = Microsoft Works for Windows
+ProductVersion = 4.00.03.442
