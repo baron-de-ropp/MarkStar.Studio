@@ -606,6 +606,15 @@ class MarkStarApp(App[None]):
             priority=True,
             key_display="F9",
         ),
+        # Tab cycling has two routes on purpose. F6 / Shift+F6 are the primary
+        # pair: a bare F-key is one unambiguous escape sequence no terminal
+        # rewrites, and F6 is CUA's "next pane/window" — what Works meant by
+        # Ctrl+F6. Ctrl+PageUp/PageDown stay as aliases for terminals that pass
+        # them through; VTE terminals (GNOME Terminal) bind those to their own
+        # tabs, so they never reach us there. If Shift+F6 is the one that goes
+        # missing, plain F6 still wraps around to every tab.
+        Binding("ctrl+pagedown", "next_tab", "Next tab", show=False, priority=True),
+        Binding("ctrl+pageup", "prev_tab", "Previous tab", show=False, priority=True),
         Binding("ctrl+right", "word_right", "Word right", show=False, priority=True),
         Binding("ctrl+left", "word_left", "Word left", show=False, priority=True),
         Binding("ctrl+up", "paragraph_up", "Paragraph up", show=False, priority=True),
@@ -969,8 +978,10 @@ class MarkStarApp(App[None]):
             self.cmd_toggle_project_panel,
             "ctrl+p",
         )
-        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+pagedown")
-        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
+        # Advertise the key that actually arrives everywhere; Ctrl+PageUp/Down
+        # still work (see BINDINGS) but must not be what the menu promises.
+        add("next_tab", "Next Tab", "View", self.cmd_next_tab, "f6")
+        add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "shift+f6")
         add("outline", "Outline…", "View", self.cmd_outline, "f4")
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
         add(

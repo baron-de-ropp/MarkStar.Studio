@@ -48,7 +48,7 @@ Every command is a single keystroke — no two-key chords, anywhere. Anything wi
 | **Ctrl+Home / Ctrl+End** | Start / end of the document |
 | **Ctrl+←/→** | Word hop |
 | **Ctrl+↑/↓** | Paragraph hop |
-| **Ctrl+PageUp/PageDown** | Previous / next tab (see the note below) |
+| **F6** / **Shift+F6** | Next / previous tab |
 
 Inside the find bar: **Ctrl+T** toggles match-case, **Ctrl+L** replaces all, **Ctrl+R** expands to replace. With the project panel focused, **Ctrl+F** searches every file in the project.
 
@@ -57,10 +57,11 @@ Menu-only (no key): Open Folder, Close Others, Close All, Save As, Save All, Com
 Launching with no file shows a task launcher: **Recent Files / Projects / New**, arrow through and press Enter. If you had files open last time, the first row offers them all back, carets included. Open files from the CLI too (`markstar chapter.md`). Soft wrap on. The status strip counts *prose* — Markdown syntax, code blocks, link URLs and comments don't inflate the total — and shows the selection's count when you have one. Line numbers are an optional faint gutter (View → Line Numbers).  
 Avoid Alt (terminals steal it) and Ctrl+M (same as Enter).
 
-> **Tab switching in GNOME Terminal / other VTE terminals:** `Ctrl+PageUp` and
-> `Ctrl+PageDown` are bound by the terminal itself to switch *its* tabs, so they
-> never reach MarkStar. Either rebind them in the terminal's preferences, or use
-> View → Next Tab / Previous Tab from the `F9` menu.
+`Ctrl+PageUp` / `Ctrl+PageDown` also switch tabs where the terminal passes them
+through — GNOME Terminal and other VTE terminals bind those to their *own* tabs,
+which is why `F6` is the advertised key: a bare F-key is one escape sequence no
+terminal rewrites. If `Shift+F6` is the one your terminal loses, `F6` wraps
+around, so it still reaches every tab on its own.
 
 ```bash
 pytest

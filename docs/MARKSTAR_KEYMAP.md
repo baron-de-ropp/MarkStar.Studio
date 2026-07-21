@@ -49,7 +49,8 @@
 | `Ctrl+K` | StarBot AI panel |
 | `Ctrl+G` | Suggest spelling correction |
 | `F7` | Toggle spellcheck |
-| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous tab — **intercepted by VTE terminals** (GNOME Terminal binds them to its own tabs); the View menu is the reliable path |
+| `F6` / `Shift+F6` | Next / previous tab (CUA's "next pane" — what Works reached via `Ctrl+F6`) |
+| `Ctrl+PageDown` / `Ctrl+PageUp` | Next / previous tab — alias only; **VTE terminals eat these** (GNOME Terminal binds them to its own tabs) |
 | `Esc` / `F9` | Open menu ribbon |
 
 > **Why not `Ctrl+I` for italic?** In a terminal `Ctrl+I` *is* the Tab key — physically unavailable. Italic uses `Ctrl+E` instead ("emphasis"). The rest of the formatting set lives in the **Format menu** (below).

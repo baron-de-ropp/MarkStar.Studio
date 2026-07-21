@@ -44,6 +44,7 @@ _CONTEXT_KEYS: list[tuple[str, list[tuple[str, str]]]] = [
             ("Ctrl+← / Ctrl+→", "Word left / right"),
             ("Ctrl+↑ / Ctrl+↓", "Paragraph up / down"),
             ("PageUp / PageDown", "A screen at a time"),
+            ("F6 / Shift+F6", "Next / previous tab"),
         ],
     ),
 ]
