@@ -1,6 +1,8 @@
 name: Release
 
-# Cut a release by pushing a version tag:  git tag v0.2.0 && git push origin v0.2.0
+# Cut a release by pushing a version tag:  git tag v0.2.1 && git push origin v0.2.1
+# The tag is the single source of truth: packaging/stamp_version.py writes it
+# into __init__.py + pyproject.toml at build time, so --version never drifts.
 on:
   push:
     tags:
@@ -30,6 +32,7 @@ jobs:
       - name: Build binary
         run: |
           python -m pip install --upgrade pip
+          python packaging/stamp_version.py  # sync version to the tag
           pip install . pyinstaller
           pyinstaller ${{ env.PYINSTALLER_ARGS }}
       - name: Package .deb and .rpm
@@ -44,7 +47,7 @@ jobs:
           for T in deb rpm; do
             fpm -s dir -t "$T" -n markstarstudio -v "$VERSION" \
               --description "MarkStar Studio - a Markdown-native terminal word processor" \
-              --license MIT --url "https://github.com/baron-de-ropp/markstarstudio" \
+              --license MIT --url "https://github.com/baron-de-ropp/MarkStar.Studio" \
               --maintainer "Ryan Baron de Ropp" \
               -C pkgroot .
           done
@@ -65,6 +68,7 @@ jobs:
       - name: Build .exe
         run: |
           python -m pip install --upgrade pip
+          python packaging/stamp_version.py  # sync version to the tag
           pip install . pyinstaller
           pyinstaller ${{ env.PYINSTALLER_ARGS }}
       - uses: actions/upload-artifact@v4
@@ -82,6 +86,7 @@ jobs:
       - name: Build binary
         run: |
           python -m pip install --upgrade pip
+          python packaging/stamp_version.py  # sync version to the tag
           pip install . pyinstaller
           pyinstaller ${{ env.PYINSTALLER_ARGS }}
       - name: Make .dmg
