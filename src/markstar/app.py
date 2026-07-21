@@ -77,10 +77,12 @@ from markstar.ui.edit_card import EditCard
 from markstar.ui.editor_session import EditorSession
 from markstar.ui.layout import PANEL_GAP, ProseLayout, compute_layout
 from markstar.ui.starbot_panel import StarBotPanel
+from markstar.ui.fast_height import install as _install_fast_height
 from markstar.ui.scrollbar import install as _install_thin_scrollbars
 from markstar.ui.tab_bar import TabBar, TabInfo
 
 _install_thin_scrollbars()  # slimmer scrollbar glyph, process-wide
+_install_fast_height()      # O(1) wrapped-document height (typing latency)
 from markstar.ui.find_bar import FindBar
 from markstar.ui.find_controller import FindController
 from markstar.ui.keys import normalize_key
@@ -186,8 +188,9 @@ class MarkStarTextArea(TextArea):
             return
         view = self.size.height
         # Base the extra on the true content height (wrapped_document.height), NOT
-        # the post-super virtual_size — reading the latter back can compound the
-        # padding across the re-layouts that enlarging virtual_size triggers.
+        # the post-super virtual_size — assigning virtual_size re-enters this
+        # method, so reading it back compounds the padding (measured: 60 + 16
+        # instead of 60 + 8). Cheap regardless: ui/fast_height makes this O(1).
         content_h = self.wrapped_document.height
         if view > 0 and content_h > view:
             extra = int(view * self._SCROLL_PAST_END_FRACTION)
