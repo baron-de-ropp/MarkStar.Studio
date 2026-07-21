@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from markstar import __version__
@@ -10,6 +11,7 @@ from markstar.app import MarkStarApp
 from markstar.ui.project_panel import ProjectPanel
 from markstar.ui.welcome import (
     TAB_FILES,
+    TAB_NEW,
     TAB_PROJECTS,
     WelcomeChoice,
     WelcomeScreen,
@@ -191,3 +193,55 @@ def test_skipping_welcome_leaves_panel_closed() -> None:
             return app.query_one("#project-panel", ProjectPanel).is_open
 
     assert _run(go()) is False
+
+
+# ---- the reserved well ------------------------------------------------------
+
+
+def _tab_geometry(width: int, height: int):
+    """Box height and top row on each tab, at a given terminal size."""
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(width, height)) as pilot:
+            await pilot.pause()
+            scr = WelcomeScreen(
+                Path("/tmp"),
+                __version__,
+                [Path(f"/tmp/project-{n}") for n in range(5)],
+                [(Path(f"/tmp/chapter-{i}.md"), 0.0) for i in range(1, 8)],
+                session_count=3,
+            )
+            await app.push_screen(scr)
+            for _ in range(6):
+                await pilot.pause()
+            out = {}
+            for tab in (TAB_FILES, TAB_PROJECTS, TAB_NEW):
+                scr._show_tab(tab)
+                for _ in range(6):
+                    await pilot.pause()
+                region = scr.query_one("#welcome-box").region
+                out[tab] = (region.height, region.y)
+            return out
+
+    return _run(go())
+
+
+def test_logo_does_not_move_between_tabs() -> None:
+    """The tabs hold very different amounts (1 row vs. 6 + a path field). The
+    well under the tab strip is a fixed reservation so the box cannot breathe
+    and drag the logo up and down as you arrow across."""
+    geo = _tab_geometry(100, 40)
+    assert len(set(geo.values())) == 1, f"box moves between tabs: {geo}"
+
+
+def test_well_shrinks_rather_than_overflowing_a_short_terminal() -> None:
+    """Reserved, not guaranteed: on a 24-row terminal the well gives back rows
+    so the hint line and the top of the logo stay on screen."""
+    height = 24
+    geo = _tab_geometry(100, height)
+    assert len(set(geo.values())) == 1, f"box moves between tabs: {geo}"
+    box_height, top = next(iter(geo.values()))
+    assert top >= 0 and top + box_height <= height, (
+        f"box ({box_height} rows at row {top}) overflows a {height}-row terminal"
+    )

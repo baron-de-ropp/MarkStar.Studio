@@ -35,6 +35,15 @@ _BROWSE_ID = "::browse"
 _NEW_ID = "::new"
 _SESSION_ID = "::session"
 
+# Height of the reserved well under the tab strip, in rows: the tallest tab is
+# Projects, at 7 list rows over a 3-row path field. Every tab gets all 10 so the
+# logo above stays put; shorter tabs leave the remainder blank.
+_FIELD_ROWS = 3
+_WELL_ROWS = 7 + _FIELD_ROWS
+# Floor for short terminals — below this the well shows too little to be worth
+# reserving, and the hint line matters more.
+_WELL_MIN_ROWS = 4
+
 
 @dataclass(frozen=True)
 class WelcomeChoice:
@@ -104,9 +113,19 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         text-align: center;
         padding: 0 0 1 0;
     }
-    #welcome-folder {
+    /* Fixed-height well for the list + path field. The three tabs hold wildly
+       different amounts of content (one "Blank document" row vs. six projects
+       and a path field), and with an auto height the box would grow and shrink
+       — dragging the logo up and down every time you arrow between tabs. The
+       height is the tallest case (7 list rows + a 3-row path field); shorter
+       tabs simply leave the remainder blank. */
+    #welcome-picker {
         width: 68;
         max-width: 100%;
+        height: 10;
+    }
+    #welcome-folder {
+        width: 100%;
         border: round $accent 50%;
         background: $surface;
         display: none;   /* only the Projects tab shows the path field */
@@ -118,8 +137,7 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         border: round $accent;
     }
     #recent-list {
-        width: 68;
-        max-width: 100%;
+        width: 100%;
         max-height: 7;
         border: none;
         background: $surface;
@@ -263,20 +281,62 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         except Exception:
             pass
 
+    # ---- the reserved well -----------------------------------------------
+
+    def _refresh_well(self) -> None:
+        """Size the well to ``_WELL_ROWS``, shrinking it when the terminal is short.
+
+        A fixed height is what stops the box breathing as you arrow between tabs,
+        but held rigidly it would push the hint line — and the top of the logo —
+        off a 24-row terminal. So it is a reservation, not a guarantee: measure
+        what the rest of the box actually needs and give the well whatever is
+        left, up to ``_WELL_ROWS``. Measuring beats a table of constants here
+        because the chrome above it changes height with the compact logo.
+        """
+        try:
+            well = self.query_one("#welcome-picker", Vertical)
+            recent = self.query_one("#recent-list", OptionList)
+        except Exception:
+            return
+        chrome = 0
+        for sel in ("#welcome-logo", "#welcome-tagline", "#welcome-tabs",
+                    "#welcome-hints", "#welcome-brand"):
+            try:
+                widget = self.query_one(sel)
+            except Exception:
+                continue
+            if widget.display:
+                chrome += widget.region.height
+        if chrome <= 0:
+            return  # pre-layout; on_mount's call_after_refresh will get it
+        spare = self.app.size.height - chrome
+        rows = max(_WELL_MIN_ROWS, min(_WELL_ROWS, spare))
+        # Assigning is already change-guarded — Textual only relayouts when the
+        # rule actually differs — so this is safe to call on every resize.
+        well.styles.height = rows
+        # The list must leave room for the path field below it, or a cramped
+        # well would clip the field on the Projects tab — you'd be typing a
+        # folder name into something you can't see.
+        recent.styles.max_height = max(1, rows - _FIELD_ROWS)
+
     def on_resize(self, event: events.Resize) -> None:
         self._refresh_logo()
+        # After the refresh, so the chrome is measured at its new size (the
+        # compact logo and the two-line hints change height on narrow screens).
+        self.call_after_refresh(self._refresh_well)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="welcome-box"):
             yield Static(self._logo_markup(), id="welcome-logo", markup=True)
             yield Static("", id="welcome-tagline")
             yield Static(self._tabs_markup(), id="welcome-tabs", markup=True)
-            yield OptionList(id="recent-list")
-            yield PathInput(
-                value=str(self._default_dir),
-                placeholder="~/path/to/your/project  (Tab to complete)",
-                id="welcome-folder",
-            )
+            with Vertical(id="welcome-picker"):
+                yield OptionList(id="recent-list")
+                yield PathInput(
+                    value=str(self._default_dir),
+                    placeholder="~/path/to/your/project  (Tab to complete)",
+                    id="welcome-folder",
+                )
             hk = token(self.app, "hint-key")
             # Each key+label is one unbreakable unit (nbsp within); groups are
             # separated by ordinary spaces so wrapping only happens *between*
@@ -310,6 +370,7 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
     def on_mount(self) -> None:
         self._refresh_logo()
         self._show_tab(self._tab)
+        self.call_after_refresh(self._refresh_well)
 
     # ---- tabs ------------------------------------------------------------
 
