@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import inspect
+import asyncio
 import re
 import sys
+from functools import partial
 from pathlib import Path
 
 from rich.style import Style
@@ -21,9 +24,20 @@ from textual.widgets.text_area import Selection
 
 from markstar import __version__
 from markstar.commands.registry import Command, CommandRegistry
-from markstar.config import RECENT_FILES_MAX, RECENT_PROJECTS_MAX, Preferences
+from markstar.config import (
+    RECENT_FILES_MAX,
+    RECENT_PROJECTS_MAX,
+    Preferences,
+    session_path,
+)
+from markstar.domain.session import OpenFile, Session
+from markstar.domain.session import load as session_load
+from markstar.domain.session import save as session_save
 from markstar.domain.document import Document
+from markstar.domain import wordcount
+from markstar.domain.export import export as export_document
 from markstar.domain.recent import prune_missing, push_recent
+from markstar.domain.wordcount import Counts
 from markstar.domain.savepath import resolve_save_path
 from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
 from markstar.domain.autosave import (
@@ -52,6 +66,12 @@ from markstar.ui.dialogs import (
     RestoreDialog,
     SaveChangesDialog,
 )
+from markstar.domain.outline import headings as md_headings
+from markstar.domain.projectsearch import search_project
+from markstar.ui.export_dialog import ExportDialog
+from markstar.ui.find_results import FindResultsScreen
+from markstar.ui.help_screen import HelpScreen
+from markstar.ui.outline import OutlineScreen
 from markstar.ui.quick_open import QuickOpenScreen
 from markstar.ui.edit_card import EditCard
 from markstar.ui.editor_session import EditorSession
@@ -86,6 +106,9 @@ from markstar.ui.themes import (
 # Footer metrics compaction thresholds (see _refresh_metrics).
 _METRICS_NARROW = 66          # below: drop the least-important metric
 _METRICS_MEDIUM = 92          # below: compact labels
+# Debounce before recounting prose. Long enough that a burst of typing costs
+# one pass, short enough that the footer feels live when you stop.
+_METRICS_DEBOUNCE = 0.35
 # (Spell suggestion popup sizing lives in ui/suggest_popup.)
 # Terminal control (OSC): set/reset the default background so the sub-cell strip
 # below the last row matches the theme instead of the terminal default.
@@ -116,6 +139,25 @@ class MarkStarTextArea(TextArea):
     # text runs flush to the scrollbar with no extra right inset. (Was 3, which
     # left a visible gap between the wrapped text and the edge.)
     EXTRA_RIGHT_MARGIN = 0
+
+    # Textual's TextArea binds Home/End to the *line* ends and never binds the
+    # Ctrl variants, so document-start/end simply did nothing. In a manuscript
+    # that is the difference between reaching chapter one and scrolling to it.
+    # (No Ctrl+Shift+Home/End companions: terminals can't be relied on to send
+    # them, and a shortcut that works on one machine only is worse than none.)
+    BINDINGS = [
+        Binding("ctrl+home", "cursor_doc_start", "Top of document", show=False),
+        Binding("ctrl+end", "cursor_doc_end", "End of document", show=False),
+    ]
+
+    def action_cursor_doc_start(self) -> None:
+        self.move_cursor((0, 0))
+        self.scroll_cursor_visible()
+
+    def action_cursor_doc_end(self) -> None:
+        last = self.document.line_count - 1
+        self.move_cursor((last, len(self.document.get_line(last))))
+        self.scroll_cursor_visible()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -616,6 +658,14 @@ class MarkStarApp(App[None]):
             screen_size=lambda: self.size,
         )
         self._autosave_timer = None
+        # Prose-count cache + debounce — see _refresh_metrics.
+        self._counts_text: str | None = None
+        self._counts = Counts(0, 0)
+        self._sel_range = None
+        self._sel_words = 0
+        self._counts_timer = None
+        # path -> (row, col), so a tab reopens where you left it.
+        self._caret_memory: dict[str, tuple[int, int]] = {}
         self._starbot_chat = None  # ai.chat.StarBotChat, built lazily on first use
         self._starbot_transcript = None  # ai.history.ChatTranscript for the session
         self._starbot_proposals = {}  # proposal id -> (EditProposal, EditCard)
@@ -708,6 +758,9 @@ class MarkStarApp(App[None]):
             self.prefs.save()
             return False
         self._sync_document_from_editor()
+        # Opening bypasses _switch_tab, so note the caret here too — otherwise
+        # the tab we're leaving forgets where you were.
+        self._remember_caret()
         try:
             self.workspace.open_path(path)
         except OSError as exc:
@@ -716,6 +769,7 @@ class MarkStarApp(App[None]):
         self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
+        self._restore_caret()
         try:
             self.query_one("#editor", TextArea).focus()
         except Exception:
@@ -728,6 +782,70 @@ class MarkStarApp(App[None]):
         self._reveal_active_file()
         self.run_worker(self._maybe_restore(path))
         return True
+
+    def _capture_session(self) -> None:
+        """Record the open tabs so the splash can offer them back.
+
+        Only titled buffers survive: an untitled one has nothing to reopen from.
+        The caret of the active tab comes from the editor, the rest from what
+        was stored when they were last active.
+        """
+        if not self.prefs.restore_session:
+            return
+        editor = self._editor_or_none()
+        if editor is not None:
+            row, col = editor.cursor_location
+            active_doc = self.workspace.active
+            if active_doc.path is not None:
+                self._caret_memory[str(active_doc.path)] = (row, col)
+
+        files: list[OpenFile] = []
+        active = 0
+        for doc in self.workspace.documents:
+            if doc.path is None:
+                continue
+            if doc is self.workspace.active:
+                active = len(files)
+            row, col = self._caret_memory.get(str(doc.path), (0, 0))
+            files.append(OpenFile(doc.path, row, col))
+        root = self._path_arg if self._path_arg is not None else None
+        session_save(session_path(), Session(files=files, active=active, project_root=root))
+
+    def _restore_session(self, session: Session) -> None:
+        """Reopen a saved session's tabs and put each caret back."""
+        session = session.existing()
+        if session.is_empty:
+            self.notify("Those files are no longer there", severity="warning")
+            return
+        if session.project_root is not None and session.project_root.is_dir():
+            self._set_project_root(session.project_root, focus_tree=False)
+        for f in session.files:
+            self._caret_memory[str(f.path)] = (f.line, f.column)
+            self._open_doc(f.path, must_exist=True)
+        if session.active < self.workspace.count:
+            self.workspace.set_active(session.active)
+            self._load_active_into_editor()
+            self._refresh_status()
+        self._restore_caret()
+        self.notify(f"Reopened {self.workspace.count} file(s)")
+
+    def _restore_caret(self) -> None:
+        """Put the caret back where it was for the active document."""
+        doc = self.workspace.active
+        editor = self._editor_or_none()
+        if doc.path is None or editor is None:
+            return
+        remembered = self._caret_memory.get(str(doc.path))
+        if remembered is None:
+            return
+        row, col = remembered
+        try:
+            row = min(row, editor.document.line_count - 1)
+            col = min(col, len(editor.document.get_line(row)))
+            editor.move_cursor((row, col))
+            editor.scroll_cursor_visible()
+        except Exception:
+            pass
 
     def _save_base_dir(self) -> Path:
         """Where a typed relative path lands: project root → file's folder → cwd."""
@@ -793,6 +911,8 @@ class MarkStarApp(App[None]):
         add("save", "Save", "File", self.cmd_save, "ctrl+s")
         add("save_as", "Save As…", "File", self.cmd_save_as)  # menu only
         add("save_all", "Save All", "File", self.cmd_save_all)  # menu only
+        add("export", "Export…", "File", self.cmd_export, "f5")
+        add("find_in_project", "Find in Project…", "File", self.cmd_find_in_project)
         add("compile", "Compile…", "File", self.cmd_compile)  # expand includes → .md
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
 
@@ -849,7 +969,15 @@ class MarkStarApp(App[None]):
         )
         add("next_tab", "Next Tab", "View", self.cmd_next_tab, "ctrl+pagedown")
         add("prev_tab", "Previous Tab", "View", self.cmd_prev_tab, "ctrl+pageup")
+        add("outline", "Outline…", "View", self.cmd_outline, "f4")
         add("toggle_soft_wrap", "Soft Wrap", "View", self.cmd_toggle_soft_wrap)  # menu
+        add(
+            "toggle_line_numbers",
+            "Line Numbers",
+            "View",
+            self.cmd_toggle_line_numbers,
+            checked=lambda: self.prefs.line_numbers,
+        )
         add("toggle_center", "Center Text", "View", self.cmd_toggle_center)  # menu
         add("toggle_zen", "Zen Mode", "View", self.cmd_toggle_zen)  # menu
         add(
@@ -865,6 +993,8 @@ class MarkStarApp(App[None]):
         add("toggle_autosave", "Autosave", "Tools", self.cmd_toggle_autosave)
         add("toggle_formatting", "Formatting Preview", "View", self.cmd_toggle_formatting)
         add("theme_picker", "Theme…", "View", self.cmd_theme_picker)
+        add("cycle_theme", "Next Theme", "View", self.cmd_cycle_theme)
+        add("toggle_mouse", "Mouse Capture", "View", self.cmd_toggle_mouse_capture)
 
         add("toggle_starbot", "StarBot Chat", "Project", self.cmd_toggle_starbot, "ctrl+k")
         add("starbot_new_chat", "New StarBot Chat", "Project", self.cmd_starbot_new_chat)
@@ -872,13 +1002,14 @@ class MarkStarApp(App[None]):
         add("starbot_config", "StarBot…", "Project", self.cmd_starbot_config)
 
         add("welcome", "Welcome…", "Help", self.cmd_welcome)
-        add("about", "About…", "Help", self.cmd_about)
         add(
             "keyboard_shortcuts",
             "Keyboard Shortcuts…",
             "Help",
             self.cmd_keyboard_shortcuts,
+            "f1",
         )
+        add("about", "About…", "Help", self.cmd_about)
         add("send_feedback", "Send Feedback…", "Help", self.cmd_send_feedback)
 
     def compose(self) -> ComposeResult:
@@ -932,7 +1063,7 @@ class MarkStarApp(App[None]):
         editor.soft_wrap = self.prefs.soft_wrap
         editor.render_markdown = self.prefs.formatting
         editor.prose_width = self.prefs.prose_width
-        editor.show_line_numbers = False
+        editor.show_line_numbers = self.prefs.line_numbers
         # No distinct "paper" band or gutter chrome
         editor.highlight_cursor_line = False
         self._apply_editor_theme()
@@ -1023,8 +1154,10 @@ class MarkStarApp(App[None]):
                 base_style=Style(color=fg, bgcolor=bg),
                 selection_style=Style(bgcolor=sel),
                 cursor_line_style=Style(bgcolor=bg),
-                gutter_style=Style(color=fg, bgcolor=bg),
-                cursor_line_gutter_style=Style(color=fg, bgcolor=bg),
+                # Line numbers, when shown, sit clearly below the prose: they
+                # are a reference, not part of what you are reading.
+                gutter_style=Style(color=token(self, "rule"), bgcolor=bg),
+                cursor_line_gutter_style=Style(color=token(self, "hint-key"), bgcolor=bg),
             )
             try:
                 editor.register_theme(themed)
@@ -1077,6 +1210,15 @@ class MarkStarApp(App[None]):
                 )
             except Exception:
                 pass
+        # Line numbers live in the left margin, not in the writing measure:
+        # switching them on must not slide the prose sideways under the reader.
+        # Steal their width back from the pad so the text stays put.
+        try:
+            editor = self.query_one("#editor", MarkStarTextArea)
+            if editor.show_line_numbers:
+                left_pad = max(0, left_pad - editor.gutter_width)
+        except Exception:
+            pass
         try:
             self.query_one("#editor-left-pad").styles.width = left_pad
         except Exception:
@@ -1169,11 +1311,20 @@ class MarkStarApp(App[None]):
     def _switch_tab(self, switcher) -> None:
         """Sync editor → doc, switch tab via callable, load new doc."""
         self._sync_document_from_editor()
+        self._remember_caret()
         switcher()
         self._find.reset()
         self._load_active_into_editor()
         self._refresh_status()
+        self._restore_caret()
         self._reveal_active_file()
+
+    def _remember_caret(self) -> None:
+        """Note where the caret sits in the tab we're leaving."""
+        doc = self.workspace.active
+        editor = self._editor_or_none()
+        if doc.path is not None and editor is not None:
+            self._caret_memory[str(doc.path)] = editor.cursor_location
 
     def _reveal_active_file(self) -> None:
         """Point the project tree at whatever file is now in the editor.
@@ -1234,17 +1385,66 @@ class MarkStarApp(App[None]):
             return 1, 1
 
     def _refresh_metrics(self) -> None:
+        """Paint the footer stats, recounting in the background when stale.
+
+        Counting prose means stripping the markup out of the whole buffer, which
+        on a book-length document costs tens of milliseconds — far too much to
+        pay on the keystroke path, and this is reached from every cursor move
+        and every edit. So the footer always paints from the last known counts
+        and schedules a recount, exactly as spellcheck debounces its pass. The
+        numbers lag typing by a fraction of a second; nobody watches a word
+        count mid-sentence, and the editor stays responsive.
+        """
+        editor = self._editor_or_none()
+        selection = editor.selection if editor is not None else None
+        if self.document.text is not self._counts_text or selection != self._sel_range:
+            self._schedule_recount()
+        self._paint_metrics()
+
+    def _editor_or_none(self):
+        try:
+            return self.query_one("#editor", TextArea)
+        except Exception:
+            return None
+
+    def _schedule_recount(self) -> None:
+        if self._counts_timer is not None:
+            try:
+                self._counts_timer.stop()
+            except Exception:
+                pass
+        self._counts_timer = self.set_timer(_METRICS_DEBOUNCE, self._recount)
+
+    def _recount(self) -> None:
+        """Recompute prose counts for the document and any selection."""
+        self._counts_timer = None
+        text = self.document.text
+        self._counts_text = text
+        self._counts = wordcount.count(text)
+
+        editor = self._editor_or_none()
+        self._sel_range = editor.selection if editor is not None else None
+        selected = ""
+        if editor is not None and not editor.selection.is_empty:
+            selected = editor.selected_text
+        self._sel_words = wordcount.count(selected).words if selected else 0
+        self._paint_metrics()
+
+    def _paint_metrics(self) -> None:
         """Right-aligned stats, shortened on narrow terminals so they don't
         overflow the footer."""
-        chars = len(self.document.text)
-        words = self.document.word_count()
+        words, chars = self._counts.words, self._counts.characters
+        picked = self._sel_words
         width = self.size.width or 0
         if width < _METRICS_NARROW:
-            text = f"{words}w"
+            text = f"{picked}/{words}w" if picked else f"{words}w"
         elif width < _METRICS_MEDIUM:
-            text = f"{chars}c  │  {words}w"
+            text = f"{chars}c  │  " + (f"{picked}/{words}w" if picked else f"{words}w")
         else:
-            text = f"{chars} characters  │  {words} words  │  CommonMark"
+            text = f"{chars:,} characters  │  {words:,} words"
+            if picked:
+                text += f"  │  {picked:,} selected"
+            text += "  │  CommonMark"
         try:
             self.query_one("#support-metrics", Static).update(text)
         except Exception:
@@ -1321,12 +1521,17 @@ class MarkStarApp(App[None]):
         whether Esc means “back” or “summon menu”.
         """
         # Modal screens (path prompt, confirm, …) — run their cancel if any.
+        # A screen's own close beats Textual's inherited ``action_dismiss``,
+        # which is generic *and* a coroutine — calling that one without
+        # awaiting it just leaks a coroutine and leaves the screen open.
         if len(self.screen_stack) > 1:
             screen = self.screen
-            for name in ("action_cancel", "action_dismiss", "action_close"):
+            for name in ("action_cancel", "action_close", "action_dismiss"):
                 action = getattr(screen, name, None)
                 if callable(action):
-                    action()
+                    result = action()
+                    if inspect.isawaitable(result):
+                        self.run_worker(result)
                     return
             return
 
@@ -1566,11 +1771,17 @@ class MarkStarApp(App[None]):
                 files.append((p, p.stat().st_mtime))
             except OSError:
                 continue
+        saved = session_load(session_path()).existing() if self.prefs.restore_session else Session()
         choice = await self.push_screen_wait(
-            WelcomeScreen(self._project_root(), __version__, recent, files)
+            WelcomeScreen(
+                self._project_root(), __version__, recent, files, len(saved.files)
+            )
         )
         if choice is None or choice.kind == "new":
             return  # blank buffer, already waiting behind the modal
+        if choice.kind == "session":
+            self._restore_session(saved)
+            return
         if choice.kind == "quick_open":
             await self._quick_open_async()
             return
@@ -1973,9 +2184,11 @@ class MarkStarApp(App[None]):
         self._sync_document_from_editor()
         dirty = [i for i, doc in enumerate(self.workspace.documents) if doc.dirty]
         if not dirty:
+            self._capture_session()
             self.exit()
             return
         resume = self.workspace.active_index
+        self._capture_session()
         if not await self._resolve_dirty(dirty, allow_save_all=True):
             # Cancelled mid-walk: leave the writer where they started.
             if resume < self.workspace.count:
@@ -1998,6 +2211,18 @@ class MarkStarApp(App[None]):
 
     # Find/Replace commands delegate to the FindController (search state + logic).
     def cmd_find(self) -> None:
+        """Find in the document — or across the project when the tree has focus.
+
+        Same key, read in context: if you are standing in the file tree, the
+        thing you mean to search is the project.
+        """
+        try:
+            panel = self.query_one("#project-panel", ProjectPanel)
+            if panel.is_open and panel.has_focus_within:
+                self.cmd_find_in_project()
+                return
+        except Exception:
+            pass
         self._find.open(replace=False)
 
     def cmd_replace(self) -> None:
@@ -2023,6 +2248,13 @@ class MarkStarApp(App[None]):
 
     def action_find_prev(self) -> None:
         self.cmd_find_prev()
+
+    @on(FindBar.CaseToggled)
+    def _on_case_toggled(self, event: FindBar.CaseToggled) -> None:
+        event.stop()
+        on = self._find.toggle_case_sensitive()
+        self.query_one("#find-bar", FindBar).set_case_sensitive(on)
+        self.notify("Find: match case" if on else "Find: any case")
 
     @on(FindBar.ExpandReplace)
     def _on_expand_replace(self, event: FindBar.ExpandReplace) -> None:
@@ -2138,6 +2370,136 @@ class MarkStarApp(App[None]):
             row, col = editor.cursor_location
             editor.move_cursor((row, max(0, col - 2)))
         editor.focus()
+
+    def _goto_line(self, line: int, column: int = 0) -> None:
+        """Put the caret on a 0-based line and show it."""
+        editor = self._editor_or_none()
+        if editor is None:
+            return
+        try:
+            line = max(0, min(line, editor.document.line_count - 1))
+            column = max(0, min(column, len(editor.document.get_line(line))))
+            editor.move_cursor((line, column))
+            editor.scroll_cursor_visible(center=True)
+            editor.focus()
+        except Exception:
+            pass
+
+    def cmd_outline(self) -> None:
+        """Jump to a heading in the active document (F4)."""
+        self.run_worker(self._outline_async())
+
+    async def _outline_async(self) -> None:
+        found = md_headings(self.document.text)
+        if not found:
+            self.notify("No headings in this document", severity="warning")
+            return
+        editor = self._editor_or_none()
+        current = editor.cursor_location[0] if editor is not None else 0
+        line = await self.push_screen_wait(OutlineScreen(found, current))
+        if line is not None:
+            self._goto_line(line)
+
+    def cmd_find_in_project(self) -> None:
+        """Search every document in the project (Ctrl+F with the tree focused)."""
+        self.run_worker(self._find_in_project_async())
+
+    async def _find_in_project_async(self) -> None:
+        if self._path_arg is None:
+            self.notify("Open a project folder first", severity="warning")
+            return
+        root = self._project_root()
+        raw = await self.push_screen_wait(
+            PathPrompt(
+                f"Find in {root.name or root}",
+                initial="",
+                hint="Enter search · Esc cancel",
+            )
+        )
+        if raw is None or not raw.strip():
+            return
+        query = raw.strip()
+        self.notify(f"Searching {root.name or root}…")
+        results = await asyncio.get_running_loop().run_in_executor(
+            None,
+            partial(
+                search_project, root, query, case_sensitive=self._find.case_sensitive
+            ),
+        )
+        if not results.hits:
+            self.notify(
+                f"No hits for {query!r} in {results.files_searched} file(s)",
+                severity="warning",
+            )
+            return
+        hit = await self.push_screen_wait(FindResultsScreen(query, results))
+        if hit is None:
+            return
+        if self._open_doc(hit.path, must_exist=True):
+            self._goto_line(hit.line, hit.column)
+
+    def cmd_export(self) -> None:
+        """Export the manuscript to HTML / DOCX / PDF / EPUB (F5)."""
+        self.run_worker(self._export_async())
+
+    def _compiled_text(self) -> str:
+        """The active buffer with ``![[includes]]`` expanded — one whole book.
+
+        Exporting the raw buffer would ship a document full of unresolved
+        include tokens, so export always goes through the same expansion
+        Compile uses.
+        """
+        doc = self.document
+        base_dir = doc.path.parent if doc.path else Path.cwd()
+        output, _errors = compile_document(
+            doc.text, base_dir, make_resolver(self._project_root()), self_path=doc.path
+        )
+        return output
+
+    async def _export_async(self) -> None:
+        chosen = await self.push_screen_wait(ExportDialog())
+        if chosen is None:
+            return
+        doc = self.document
+        stem = doc.path.stem if doc.path else "untitled"
+        default_dir = doc.path.parent if doc.path else self._save_base_dir()
+        raw = await self.push_screen_wait(
+            PathPrompt(
+                f"Export {chosen.key.upper()} — where should it go?",
+                initial=str(default_dir / f"{stem}{chosen.suffix}"),
+                hint="Enter export · Esc cancel · ~ allowed",
+            )
+        )
+        if raw is None:
+            return
+        out_path = resolve_save_path(raw, self._save_base_dir(), chosen.suffix)
+        if out_path is None:
+            self.notify("Empty path — nothing exported", severity="warning")
+            return
+        if out_path.exists():
+            ok = await self.push_screen_wait(
+                ConfirmDialog(
+                    title="Overwrite existing file?",
+                    message=f'"{out_path.name}" already exists.\nReplace it?',
+                    yes_label="overwrite",
+                    no_label="cancel",
+                )
+            )
+            if not ok:
+                self.notify("Export cancelled")
+                return
+
+        text = self._compiled_text()
+        title = stem.replace("-", " ").replace("_", " ").strip() or "Untitled"
+        self.notify(f"Exporting {chosen.key.upper()}…")
+        # pandoc on a book takes seconds; keep it off the UI thread.
+        ok, message = await asyncio.get_running_loop().run_in_executor(
+            None, partial(export_document, text, out_path, chosen.key, title=title)
+        )
+        if ok:
+            self.notify(f"Exported → {out_path.name}")
+        else:
+            self.notify(f"Export failed: {message}", severity="error", timeout=10)
 
     def cmd_compile(self) -> None:
         """Expand ``![[…]]`` includes of the active buffer into one Markdown file."""
@@ -2378,7 +2740,7 @@ class MarkStarApp(App[None]):
             self.prefs.mouse = "off"
             self.prefs.save()
             self.notify(
-                "Mouse released — native pointer & selection (View menu re-enables)"
+                "Mouse released — native pointer & selection (View → Mouse Capture restores it)"
             )
         else:
             driver._mouse = True
@@ -2699,6 +3061,19 @@ class MarkStarApp(App[None]):
             pass
         self.notify(f"Zen mode {'on' if self._zen else 'off'} — Esc for the menu")
 
+    def cmd_toggle_line_numbers(self) -> None:
+        """Show/hide the faint line-number gutter."""
+        editor = self.query_one("#editor", MarkStarTextArea)
+        self.prefs.line_numbers = not self.prefs.line_numbers
+        editor.show_line_numbers = self.prefs.line_numbers
+        self.prefs.save()
+        # The gutter takes columns from the text area, so the writing measure
+        # has to be recomputed or the prose shifts under the reader.
+        self._update_prose_layout()
+        self.notify(
+            "Line numbers on" if self.prefs.line_numbers else "Line numbers off"
+        )
+
     def cmd_toggle_center(self) -> None:
         """Toggle dynamic centering of the prose column."""
         self.prefs.center_text = not self.prefs.center_text
@@ -2793,8 +3168,8 @@ class MarkStarApp(App[None]):
         self.notify(f"MarkStar {__version__} — markstar.studio · a Markdown-native homage to WordStar · MIT")
 
     def cmd_keyboard_shortcuts(self) -> None:
-        lines = [f"{cmd.binding:18} {cmd.label}" for cmd in self.registry if cmd.binding]
-        self.notify("\n".join(lines) if lines else "(no bindings)", timeout=8)
+        """Open the keyboard reference (F1). Generated from the registry."""
+        self.push_screen(HelpScreen(self.registry, __version__))
 
     def cmd_send_feedback(self) -> None:
         self.notify(

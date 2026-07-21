@@ -2,11 +2,14 @@
 
 **MarkStar** ([markstar.studio](https://markstar.studio)) — a Markdown-native terminal word processor. A modern homage to WordStar.
 
-**Status:** v0.1 in progress — **P0–P2** (shell, menus/find, **multi-file tabs** + motion).
+**Status:** v0.4 — file lifecycle, project search, outline, export, session restore.
 
 ## Docs
 
-- [Prose v0.1 Design Specification](docs/PROSE_V0.1_DESIGN_SPEC.md)
+- [Keymap design](docs/MARKSTAR_KEYMAP.md) — what MarkStar binds, and why
+- [Feature parity vs WordStar & MS Works](docs/research/FEATURE_PARITY.md)
+- [Terminal key physics](docs/TERMINAL_KEY_PHYSICS.md) — what a TUI can and cannot bind
+- [v0.1 design spec](docs/MARKSTAR_V0.1_DESIGN_SPEC.md) (historical)
 
 ## Quick start
 
@@ -38,17 +41,23 @@ Every command is a single keystroke — no two-key chords, anywhere. Anything wi
 | **Ctrl+P** | Project panel — open+focus, focus, then close |
 | **Ctrl+K** | StarBot AI panel |
 | **Ctrl+G** / **F7** | Suggest spelling correction / toggle spellcheck |
+| **F1** | Keyboard reference (every command, generated from the code) |
+| **F4** | Outline — jump to any Markdown heading |
+| **F5** | Export to HTML / DOCX / PDF / EPUB (DOCX and PDF need pandoc) |
+| **Ctrl+Home / Ctrl+End** | Start / end of the document |
 | **Ctrl+←/→** | Word hop |
 | **Ctrl+↑/↓** | Paragraph hop |
 | **Ctrl+PageUp/PageDown** | Previous / next tab |
 
+Inside the find bar: **Ctrl+T** toggles match-case, **Ctrl+L** replaces all, **Ctrl+R** expands to replace. With the project panel focused, **Ctrl+F** searches every file in the project.
+
 Menu-only (no key): Open Folder, Close Others, Close All, Save As, Save All, Compile, Duplicate Line, Move Line Up/Down, most Format commands, Soft Wrap, Zen Mode, Theme.
 
-Launching with no file shows a task launcher: **Recent Files / Projects / New**, arrow through and press Enter. Open files from the CLI too (`markstar chapter.md`). Soft wrap on; status shows word count.  
+Launching with no file shows a task launcher: **Recent Files / Projects / New**, arrow through and press Enter. If you had files open last time, the first row offers them all back, carets included. Open files from the CLI too (`markstar chapter.md`). Soft wrap on. The status strip counts *prose* — Markdown syntax, code blocks, link URLs and comments don't inflate the total — and shows the selection's count when you have one. Line numbers are an optional faint gutter (View → Line Numbers).  
 Avoid Alt (terminals steal it) and Ctrl+M (same as Enter).
 
 ```bash
-pytest   # 30 tests
+pytest
 ```
 
 ## Stack

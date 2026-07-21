@@ -51,8 +51,27 @@ class FindController:
         # End offset of the most recently focused match — the origin for stepping
         # to the next/previous occurrence and for the n/total badge.
         self._last_end = 0
+        # Case-insensitive by default: that is what a writer hunting a phrase
+        # wants, and the option is one key away when it isn't.
+        self._case_sensitive = False
 
     # --- state -------------------------------------------------------------
+
+    def _same_text(self, a: str, b: str) -> bool:
+        """Equality under the active case mode."""
+        return a == b if self._case_sensitive else a.lower() == b.lower()
+
+    @property
+    def case_sensitive(self) -> bool:
+        return self._case_sensitive
+
+    def toggle_case_sensitive(self) -> bool:
+        """Flip case matching and re-run everything that depends on it."""
+        self._case_sensitive = not self._case_sensitive
+        self._last_end = 0
+        self.refresh_highlights()
+        self.update_count()
+        return self._case_sensitive
 
     def reset(self) -> None:
         """Forget the last-focused match (on tab switch, open, close, edit)."""
@@ -127,13 +146,18 @@ class FindController:
             selected = self._editor().selected_text
         except Exception:
             selected = ""
-        if selected and selected.lower() == query.lower():
+        if selected and self._same_text(selected, query):
             current_start = self._selection_start_index()
         if current_start is None and self._last_end:
             current_start = max(0, self._last_end - len(query))
 
         match = step_find(
-            text, query, direction=direction, cursor=cursor, current_start=current_start
+            text,
+            query,
+            direction=direction,
+            cursor=cursor,
+            current_start=current_start,
+            case_sensitive=self._case_sensitive,
         )
         if match is None:
             if announce_missing:
@@ -162,14 +186,18 @@ class FindController:
         except Exception:
             selected = ""
         match: Match | None = None
-        if selected and selected.lower() == query.lower():
+        if selected and self._same_text(selected, query):
             start = self._selection_start_index()
             if start is not None:
                 match = Match(start, start + len(selected))
         if match is None:
-            match = find_next(doc.text, query, start=cursor)
+            match = find_next(
+                doc.text, query, start=cursor, case_sensitive=self._case_sensitive
+            )
         if match is None:
-            match = find_next(doc.text, query, start=0)
+            match = find_next(
+                doc.text, query, start=0, case_sensitive=self._case_sensitive
+            )
         if match is None:
             self._notify(f"Not found: {query!r}", severity="warning")
             self.update_count()
@@ -178,9 +206,13 @@ class FindController:
         self._push_editor()
         self._last_end = new_m.end
         # Advance to the next occurrence after the replacement.
-        nxt = find_next(doc.text, query, start=new_m.end)
+        nxt = find_next(
+            doc.text, query, start=new_m.end, case_sensitive=self._case_sensitive
+        )
         if nxt is None and new_m.end > 0:
-            nxt = find_next(doc.text, query, start=0)
+            nxt = find_next(
+                doc.text, query, start=0, case_sensitive=self._case_sensitive
+            )
         if nxt is not None:
             self._select_range(nxt.start, nxt.end)
             self._last_end = nxt.end
@@ -205,7 +237,12 @@ class FindController:
         if not query:
             self._notify("Enter a find string", severity="warning")
             return
-        n = replace_all(self._document(), query, bar.replacement)
+        n = replace_all(
+            self._document(),
+            query,
+            bar.replacement,
+            case_sensitive=self._case_sensitive,
+        )
         self._push_editor()
         self._last_end = 0
         self._refresh_status()
@@ -224,7 +261,13 @@ class FindController:
         if not bar.is_visible or not bar.query:
             editor.clear_search_highlights()
             return
-        editor.set_search_highlights(find_all(self._document().text, bar.query))
+        editor.set_search_highlights(
+            find_all(
+                self._document().text,
+                bar.query,
+                case_sensitive=self._case_sensitive,
+            )
+        )
 
     def update_count(self) -> None:
         """Refresh the n/total badge on the find bar and the soft highlights."""
@@ -240,7 +283,9 @@ class FindController:
             bar.set_match_count(None, 0)
             self.refresh_highlights()
             return
-        matches = find_all(self._document().text, query)
+        matches = find_all(
+            self._document().text, query, case_sensitive=self._case_sensitive
+        )
         total = len(matches)
         try:
             self._editor().set_search_highlights(matches)

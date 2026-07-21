@@ -1,11 +1,15 @@
-# Prose — session handoff
+# MarkStar Studio — session handoff
+
+> **Note:** this file predates the MarkStar rename and the v0.3/v0.4 work.
+> Paths and names are corrected, but treat its status claims as historical —
+> `docs/research/FEATURE_PARITY.md` is the current picture.
 
 **Date:** 2026-07-18  
 **Location:** `docs/HANDOFF.md` (in-repo; not `/tmp`)  
 **Purpose of next session:** **Fix Replace All key delivery** (blocking UX). Domain `replace_all()` works; real terminal does not fire the chord. Do not invent new chords without asking the user.  
-**Repo:** `/home/daudzegir/Applications/prose`  
-**Remote:** `https://source.ryanderopp.com/daudzegir/prose.git`  
-**Stack:** Python 3.12, Textual 8.2.8, pytest; entry `prose` (MIT)  
+**Repo:** `/home/daudzegir/Applications/MarkStarStudio`  
+**Remote:** `https://source.ryanderopp.com/daudzegir/markstar.git`  
+**Stack:** Python 3.12, Textual 8.2.8, pytest; entry `markstar` (MIT)  
 **Branch:** `main` (local mods uncommitted — see [Working tree](#working-tree-as-of-handoff))
 
 ---
@@ -13,12 +17,12 @@
 ## How to resume (first 60 seconds)
 
 ```bash
-cd /home/daudzegir/Applications/prose
+cd /home/daudzegir/Applications/MarkStarStudio
 .venv/bin/python -m pytest -q   # expect 52 passed as of this handoff
-.venv/bin/prose                 # or: PYTHONPATH=src .venv/bin/python -m prose.app
+.venv/bin/markstar                 # or: PYTHONPATH=src .venv/bin/python -m markstar.app
 ```
 
-**Authoritative product scope:** `docs/PROSE_V0.1_DESIGN_SPEC.md`  
+**Authoritative product scope:** `docs/MARKSTAR_V0.1_DESIGN_SPEC.md`  
 **Scrollbar/margin geometry (already solved; don’t re-litigate):** `docs/SCROLLBAR_MARGIN_DIAG.md`  
 **This handoff:** `docs/HANDOFF.md`
 
@@ -47,7 +51,7 @@ cd /home/daudzegir/Applications/prose
 
 ### What is *not* broken
 
-- **Domain logic:** `prose.domain.search.replace_all()` is correct and unit-tested (`tests/test_search.py`).
+- **Domain logic:** `markstar.domain.search.replace_all()` is correct and unit-tested (`tests/test_search.py`).
 - **App command:** `MarkStarApp.cmd_replace_all()` works when invoked:
   - Syncs editor → document, reads find/replace fields, calls `replace_all`, pushes text back, notifies `Replaced N occurrence(s)`.
 - **Headless pilot proof** (agent ran; code path OK when Textual *receives* the key name):
@@ -63,11 +67,11 @@ So this is almost certainly a **key delivery / binding precedence / focus** prob
 
 ### Strongest working theory
 
-**Stacked modifiers (Alt, and often Shift on top of Ctrl) are stripped or remapped by the host before Prose sees them.**
+**Stacked modifiers (Alt, and often Shift on top of Ctrl) are stripped or remapped by the host before MarkStar sees them.**
 
 Classic degradation pattern already proven for this app:
 
-| User presses | Terminal may deliver | What Prose does today |
+| User presses | Terminal may deliver | What MarkStar does today |
 |--------------|----------------------|------------------------|
 | Ctrl+Alt+R | `ctrl+r` | Open/expand replace (not all) |
 | Ctrl+Shift+R | `ctrl+r` (Shift lost) **or nothing** (host steals) | Open/expand replace or no-op |
@@ -91,7 +95,7 @@ Hosts that often steal **Ctrl+Shift+R:** browsers (hard reload), IDEs, some term
 | Move line | Alt+↑/↓ | Ctrl+Shift+↑/↓ |
 | Soft wrap | Alt+Z | Ctrl+Shift+L |
 
-3. **`src/prose/ui/keys.py`:** `normalize_key()` lowercases letter segments + canonicalizes modifier order (`shift+ctrl+r` → `ctrl+shift+r`). `is_replace_all_key()`, `is_save_all_key()`.
+3. **`src/markstar/ui/keys.py`:** `normalize_key()` lowercases letter segments + canonicalizes modifier order (`shift+ctrl+r` → `ctrl+shift+r`). `is_replace_all_key()`, `is_save_all_key()`.
 4. **Handlers check replace-all before bare `ctrl+r`** in `FindInput` and `MarkStarApp.on_key`.
 5. **FindInput** intercepts bulk keys before Textual `Input` defaults (notably Input binds `ctrl+shift+a` → select all, which would eat Save All).
 6. **Docs** (README, design spec key tables, this handoff) updated for no-Alt policy.
@@ -101,10 +105,10 @@ Hosts that often steal **Ctrl+Shift+R:** browsers (hard reload), IDEs, some term
 
 | File | Role |
 |------|------|
-| `src/prose/ui/keys.py` | `_REPLACE_ALL_KEYS`, `normalize_key`, `is_replace_all_key` |
-| `src/prose/ui/find_bar.py` | `FindInput._on_key`, `FindBar.BINDINGS`, hints UI, `action_replace_all` → `ReplaceRequested("all")` |
-| `src/prose/app.py` | `BINDINGS` for replace all / find prev; `on_key` fallback; `cmd_replace_all`; `action_replace_all_key`; registry id `replace_all` |
-| `src/prose/domain/search.py` | `replace_all(document, query, replacement) -> int` (pure; tested) |
+| `src/markstar/ui/keys.py` | `_REPLACE_ALL_KEYS`, `normalize_key`, `is_replace_all_key` |
+| `src/markstar/ui/find_bar.py` | `FindInput._on_key`, `FindBar.BINDINGS`, hints UI, `action_replace_all` → `ReplaceRequested("all")` |
+| `src/markstar/app.py` | `BINDINGS` for replace all / find prev; `on_key` fallback; `cmd_replace_all`; `action_replace_all_key`; registry id `replace_all` |
+| `src/markstar/domain/search.py` | `replace_all(document, query, replacement) -> int` (pure; tested) |
 | `tests/test_keys.py` | Chord helper unit tests |
 | `tests/test_search.py` | Domain replace-all |
 
@@ -155,10 +159,10 @@ Uncommitted relative to `origin/main`:
 ```text
  M README.md
  M docs/HANDOFF.md
- M docs/PROSE_V0.1_DESIGN_SPEC.md
- M src/prose/app.py
- M src/prose/ui/find_bar.py
- M src/prose/ui/keys.py
+ M docs/MARKSTAR_V0.1_DESIGN_SPEC.md
+ M src/markstar/app.py
+ M src/markstar/ui/find_bar.py
+ M src/markstar/ui/keys.py
  M tests/test_keys.py
 ?? untitled.md untitled2.md   # user scratch; ignore
 ```
@@ -189,7 +193,7 @@ Uncommitted relative to `origin/main`:
 | Replace all | Ctrl+Shift+Enter (primary), Ctrl+Shift+R (secondary), Edit menu | **No — broken in live terminal** |
 | Close bar | Esc | Yes |
 
-- Domain: `src/prose/domain/search.py`; tests `tests/test_search.py`.
+- Domain: `src/markstar/domain/search.py`; tests `tests/test_search.py`.
 - **Ctrl+H** = Backspace in most terminals; never map Backspace → replace.
 
 ---
@@ -220,7 +224,7 @@ Uncommitted relative to `origin/main`:
 ## Architecture map
 
 ```
-src/prose/
+src/markstar/
   app.py              # MarkStarApp shell, commands, modals, find wiring, MarkStarTextArea
   commands/registry.py
   domain/
@@ -235,7 +239,7 @@ src/prose/
     themes.py
 tests/                # 52 tests; domain-heavy; almost no pilot/UI tests
 docs/
-  PROSE_V0.1_DESIGN_SPEC.md
+  MARKSTAR_V0.1_DESIGN_SPEC.md
   SCROLLBAR_MARGIN_DIAG.md
   HANDOFF.md          # this file
 ```

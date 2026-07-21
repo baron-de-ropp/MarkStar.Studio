@@ -241,7 +241,7 @@ Do **not** need to change `Document` / `Workspace` for this bug.
 ## 12. Contact / product context
 
 - App name: **Prose** (terminal Markdown writer)
-- Design spec: `docs/PROSE_V0.1_DESIGN_SPEC.md` (margins 5 / zen 120 mentioned; zen not required for this fix)
+- Design spec: `docs/MARKSTAR_V0.1_DESIGN_SPEC.md` (margins 5 / zen 120 mentioned; zen not required for this fix)
 - Prefer minimal, reversible CSS/layout change over a rewrite
 
 ---

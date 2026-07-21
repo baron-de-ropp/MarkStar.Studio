@@ -33,13 +33,14 @@ _TABS = (TAB_FILES, TAB_PROJECTS, TAB_NEW)
 
 _BROWSE_ID = "::browse"
 _NEW_ID = "::new"
+_SESSION_ID = "::session"
 
 
 @dataclass(frozen=True)
 class WelcomeChoice:
-    """What the writer picked: open a file/folder, start blank, or search."""
+    """What the writer picked: open a file/folder, resume, start blank, or search."""
 
-    kind: Literal["file", "folder", "new", "quick_open"]
+    kind: Literal["file", "folder", "new", "quick_open", "session"]
     path: Path | None = None
 
 # ANSI Shadow "MARK" and "STAR", split so each word takes its own theme color.
@@ -184,15 +185,19 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         version: str,
         recent: list[Path] | None = None,
         recent_files: list[tuple[Path, float]] | None = None,
+        session_count: int = 0,
     ) -> None:
         super().__init__()
         self._default_dir = default_dir
         self._version = version
         self._recent = recent or []
         self._recent_files = recent_files or []
+        self._session_count = session_count
         # First run has nothing to arrow through, so start where the writer can
         # actually do something: naming a project folder.
-        self._tab = TAB_FILES if self._recent_files else TAB_PROJECTS
+        self._tab = (
+            TAB_FILES if (self._recent_files or session_count) else TAB_PROJECTS
+        )
 
     def _logo_markup(self, compact: bool | None = None) -> str:
         mark = token(self.app, "md-heading")  # "MARK" — heading color
@@ -343,7 +348,18 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
 
         if self._tab == TAB_FILES:
             folder.set_class(False, "shown")
-            if not self._recent_files:
+            if self._session_count:
+                # Pinned above the MRU: picking up yesterday's whole desk beats
+                # reopening one file at a time.
+                plural = "s" if self._session_count != 1 else ""
+                ol.add_option(
+                    Option(
+                        f"Continue where you left off   "
+                        f"[{dim}]{self._session_count} file{plural}[/]",
+                        id=_SESSION_ID,
+                    )
+                )
+            if not self._recent_files and not self._session_count:
                 ol.add_option(
                     Option("No recent files yet — O opens one, N starts blank",
                            disabled=True)
@@ -369,7 +385,12 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         if ol.option_count:
             ol.highlighted = 0
         # First run has an empty file list, so put the writer in the path field.
-        if self._tab == TAB_PROJECTS and not self._recent and not self._recent_files:
+        if (
+            self._tab == TAB_PROJECTS
+            and not self._recent
+            and not self._recent_files
+            and not self._session_count
+        ):
             folder.focus()
         else:
             ol.focus()
@@ -392,7 +413,9 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         chosen = event.option.id
         if not chosen:
             return
-        if chosen == _NEW_ID:
+        if chosen == _SESSION_ID:
+            self.dismiss(WelcomeChoice("session"))
+        elif chosen == _NEW_ID:
             self.dismiss(WelcomeChoice("new"))
         elif chosen == _BROWSE_ID:
             self.query_one("#welcome-folder", PathInput).focus()

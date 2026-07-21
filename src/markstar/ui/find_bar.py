@@ -21,6 +21,8 @@ class FindInput(Input):
     - Ctrl+L → Replace All  (only in replace mode; "L" = aLL — Ctrl+A is
       Select All everywhere, far too dangerous to repurpose)
     - Ctrl+R → expand find into replace
+    - Ctrl+T → toggle case matching (the only free Ctrl+letter left; on
+      macOS/BSD it is the tty VSTATUS character, harmless in raw mode)
     """
 
     async def _on_key(self, event: events.Key) -> None:
@@ -64,6 +66,12 @@ class FindInput(Input):
             event.prevent_default()
             event.stop()
             bar.expand_replace()
+            return
+
+        if key == "ctrl+t":
+            event.prevent_default()
+            event.stop()
+            bar.post_message(FindBar.CaseToggled())
             return
 
         await super()._on_key(event)
@@ -166,6 +174,9 @@ class FindBar(Vertical):
     class Dismissed(Message):
         pass
 
+    class CaseToggled(Message):
+        """Ctrl+T in either field: flip case matching."""
+
     class ExpandReplace(Message):
         """User asked to expand the find bar into find+replace."""
 
@@ -184,6 +195,7 @@ class FindBar(Vertical):
     def __init__(self, *args, show_replace: bool = False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._show_replace = show_replace
+        self._case_sensitive = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="find-row"):
@@ -298,6 +310,11 @@ class FindBar(Vertical):
         if event.input.id == "find-input":
             self.post_message(self.QueryChanged(event.value))
 
+    def set_case_sensitive(self, on: bool) -> None:
+        """Show the active case mode in the hint strip."""
+        self._case_sensitive = on
+        self._refresh_hints()
+
     def _apply_replace_visibility(self) -> None:
         row = self.query_one("#replace-row", Horizontal)
         row.display = self._show_replace
@@ -305,11 +322,13 @@ class FindBar(Vertical):
     def _refresh_hints(self) -> None:
         # Footer-style: [blue]KEY[/] Action, joined by "  |  ".
         # Both modes share the same shape: Enter · ↑↓ · one Ctrl command · Esc.
+        case_label = "Aa match case" if self._case_sensitive else "Aa any case"
         if self._show_replace:
             parts = [
                 ("Enter", "Replace & Next"),
                 ("↑↓", "Prev/Next"),
                 ("Ctrl+L", "Replace All"),
+                ("Ctrl+T", case_label),
                 ("Esc", "Close"),
             ]
         else:
@@ -317,6 +336,7 @@ class FindBar(Vertical):
                 ("Enter", "Next"),
                 ("↑↓", "Prev/Next"),
                 ("Ctrl+R", "Replace"),
+                ("Ctrl+T", case_label),
                 ("Esc", "Close"),
             ]
         hk = token(self.app, "hint-key")

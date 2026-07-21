@@ -1,8 +1,17 @@
-# Prose — portable keymap (proposal for sign-off)
+# Terminal key physics — what a TUI can and cannot bind
+
+> **Status: reference, not current design.** This began as a keymap proposal
+> for the app when it was called Prose. The keymap in §4 was never adopted —
+> see `MARKSTAR_KEYMAP.md` for what MarkStar actually binds, and the F1 help
+> screen for what the code actually binds right now.
+>
+> §1 and §3 are the enduring parts: why `Ctrl+Shift+<letter>` cannot work in a
+> terminal, which keys are eaten by the tty, and how each key encodes. Those
+> facts still govern every binding decision in this project.
 
 **Status:** DRAFT — awaiting user approval. No bindings changed yet.
 **Date:** 2026-07-18
-**Supersedes:** the "no-Alt / Ctrl+Shift tier" policy in `HANDOFF.md` and the key tables in `PROSE_V0.1_DESIGN_SPEC.md`.
+**Supersedes:** the "no-Alt / Ctrl+Shift tier" policy in `HANDOFF.md` and the key tables in `MARKSTAR_V0.1_DESIGN_SPEC.md`.
 **Goal:** one keymap that behaves the same in every terminal on Linux, macOS, and Windows — "Microsoft Works 1995, in the terminal."
 
 ---
@@ -67,7 +76,7 @@ The bug in the current design: bulk commands (Replace All, Save All, move-line, 
 
 ---
 
-## 4. Proposed Prose keymap
+## 4. Proposed keymap (SUPERSEDED — historical)
 
 Legend: **Menu** = Tier-0 guaranteed path · **Key** = Tier-1 portable shortcut · **Enhanced** = Tier-2 alias (kept for capable terminals, never required).
 

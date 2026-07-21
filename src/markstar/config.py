@@ -45,6 +45,12 @@ def config_dir() -> Path:
     return base / "markstar"
 
 
+def session_path() -> Path:
+    """Where the open-tabs session lives (never the preferences file)."""
+    override = os.environ.get("MARKSTAR_SESSION")
+    return Path(override) if override else config_dir() / "session.toml"
+
+
 def config_path() -> Path:
     override = os.environ.get("MARKSTAR_CONFIG")
     return Path(override) if override else config_dir() / "config.toml"
@@ -61,11 +67,13 @@ class Preferences:
     min_panel_width: int = 40  # project panel min columns (grows to fill margin)
     prose_width: int = 120  # max writing-measure columns (line wrap cap)
     center_text: bool = True  # center the prose column in the terminal
+    line_numbers: bool = False  # faint left gutter (off: nothing between you and the page)
     spellcheck: bool = True  # underline unknown words
     spellcheck_ms: int = 600  # debounce before re-checking after edits
     spell_language: str = "en"  # bundled dictionary (see SPELL_LANGUAGES)
     autosave: bool = True  # debounced crash-safety sidecars
     autosave_ms: int = 1500  # debounce delay
+    restore_session: bool = True  # offer to reopen last session on the splash
     recent_projects: list = field(default_factory=list)  # last folders (max 5)
     recent_files: list = field(default_factory=list)  # last documents (max 15)
     spell_added: list = field(default_factory=list)  # personal dictionary
@@ -91,6 +99,8 @@ class Preferences:
             prefs.soft_wrap = data["soft_wrap"]
         if isinstance(data.get("center_text"), bool):
             prefs.center_text = data["center_text"]
+        if isinstance(data.get("line_numbers"), bool):
+            prefs.line_numbers = data["line_numbers"]
         if isinstance(data.get("spellcheck"), bool):
             prefs.spellcheck = data["spellcheck"]
         lang = data.get("spell_language")
@@ -98,6 +108,8 @@ class Preferences:
             prefs.spell_language = lang
         if isinstance(data.get("autosave"), bool):
             prefs.autosave = data["autosave"]
+        if isinstance(data.get("restore_session"), bool):
+            prefs.restore_session = data["restore_session"]
         rp = data.get("recent_projects")
         if isinstance(rp, list):
             prefs.recent_projects = [

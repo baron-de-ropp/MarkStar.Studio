@@ -1,5 +1,10 @@
 # Prose v0.1 — Design Specification
 
+> **Status: historical.** Written for v0.1, when the app was called Prose.
+> The app is now MarkStar Studio; several decisions here (keymap, ProseAI,
+> file flows) have been superseded by v0.3/v0.4. Kept for provenance —
+> see `MARKSTAR_KEYMAP.md` and `docs/research/FEATURE_PARITY.md` for current state.
+
 **Status:** Frozen for implementation  
 **Version:** 0.1.0  
 **Date:** 2026-07-17  
@@ -161,7 +166,7 @@ UI (Textual shell)  →  CommandRegistry  →  Workspace / Document
 prose/
   pyproject.toml / README.md / LICENSE
   docs/
-    PROSE_V0.1_DESIGN_SPEC.md   ← this file
+    MARKSTAR_V0.1_DESIGN_SPEC.md   ← this file
   src/prose/
     app.py
     commands/
