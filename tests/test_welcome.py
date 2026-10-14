@@ -97,6 +97,59 @@ def test_choosing_folder_sets_project_root(tmp_path) -> None:
     assert root == tmp_path
 
 
+def test_this_folder_row_leads_projects_tab(tmp_path) -> None:
+    """When cwd qualifies as a writing folder, Projects opens with This folder first."""
+    (tmp_path / "ch1.md").write_text("x", encoding="utf-8")
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test(size=(100, 32)) as pilot:
+            await pilot.pause()
+            scr = WelcomeScreen(
+                tmp_path,
+                __version__,
+                recent=[],
+                recent_files=[],
+                session_count=0,
+                this_folder=tmp_path,
+            )
+            await app.push_screen(scr)
+            await pilot.pause()
+            return scr._tab, scr.query_one("#recent-list").get_option_at_index(0).id
+
+    tab, first_id = _run(go())
+    assert tab == TAB_PROJECTS
+    assert first_id == "::this"
+
+
+def test_home_is_pruned_from_recent_projects(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "cfg.toml"))
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "book"
+    project.mkdir()
+    (project / "a.md").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    async def go():
+        app = MarkStarApp()
+        async with app.run_test() as pilot:
+            app.prefs.recent_projects = [str(home.resolve()), str(project.resolve())]
+            app.prefs.save()
+            with patch.object(
+                app,
+                "push_screen_wait",
+                AsyncMock(return_value=WelcomeChoice("new")),
+            ):
+                await app._show_welcome()
+            await pilot.pause()
+            return list(app.prefs.recent_projects)
+
+    recents = _run(go())
+    assert str(home.resolve()) not in recents
+    assert str(project.resolve()) in recents
+
+
 def test_recent_projects_recorded_dedup_and_capped(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MARKSTAR_CONFIG", str(tmp_path / "cfg.toml"))
     dirs = [tmp_path / f"p{i}" for i in range(7)]

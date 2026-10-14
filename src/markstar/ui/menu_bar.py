@@ -13,10 +13,12 @@ from markstar.commands.registry import Command, CommandRegistry
 
 
 class MenuBar(Vertical):
-    """Word/Works-style ribbon fixed to the first line of the app layout.
+    """Word/Works-style ribbon overlay on the top of the screen.
 
     Hidden until opened (Esc / F9). Line 1 is menu names; a dropdown of
-    commands sits directly under it and pushes content down (no modal overlay).
+    commands sits under it. The shell is transparent so the editor stays
+    visible around the ribbon and beside the dropdown — only the name strip
+    and the options panel paint an opaque background.
     """
 
     DEFAULT_CSS = """
@@ -24,8 +26,10 @@ class MenuBar(Vertical):
         width: 100%;
         height: auto;
         display: none;
-        background: $boost;
-        layer: above;
+        /* Transparent shell: rows beside/under the dropdown keep showing the
+           editor. Opaque chrome lives only on #menu-names / #menu-options. */
+        background: transparent;
+        layer: overlay;
     }
 
     MenuBar.open {
@@ -46,7 +50,9 @@ class MenuBar(Vertical):
         min-width: 36;
         max-width: 72;
         height: auto;
-        max-height: 16;
+        /* Tall enough for File (15 items) plus border chrome — a tight 16
+           clipped the last rows and forced an ugly scrollbar. */
+        max-height: 24;
         margin: 0 0 0 1;
         border: solid $accent 50%;
         background: $surface;

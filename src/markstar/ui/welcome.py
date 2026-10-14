@@ -27,11 +27,13 @@ from markstar.ui.path_input import PathInput
 from markstar.ui.themes import token
 
 # Tab order, left to right. Recent Files leads because reopening what you were
-# writing yesterday is overwhelmingly the common case.
+# writing yesterday is overwhelmingly the common case — unless cwd is a writing
+# folder, in which case Projects (with "This folder") leads.
 TAB_FILES, TAB_PROJECTS, TAB_NEW = "Recent Files", "Projects", "New"
 _TABS = (TAB_FILES, TAB_PROJECTS, TAB_NEW)
 
 _BROWSE_ID = "::browse"
+_THIS_ID = "::this"
 _NEW_ID = "::new"
 _SESSION_ID = "::session"
 
@@ -49,7 +51,7 @@ _WELL_MIN_ROWS = 4
 class WelcomeChoice:
     """What the writer picked: open a file/folder, resume, start blank, or search."""
 
-    kind: Literal["file", "folder", "new", "quick_open", "session"]
+    kind: Literal["file", "folder", "new", "quick_open", "session", "browse"]
     path: Path | None = None
 
 # ANSI Shadow "MARK" and "STAR", split so each word takes its own theme color.
@@ -204,6 +206,7 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         recent: list[Path] | None = None,
         recent_files: list[tuple[Path, float]] | None = None,
         session_count: int = 0,
+        this_folder: Path | None = None,
     ) -> None:
         super().__init__()
         self._default_dir = default_dir
@@ -211,11 +214,15 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         self._recent = recent or []
         self._recent_files = recent_files or []
         self._session_count = session_count
-        # First run has nothing to arrow through, so start where the writer can
-        # actually do something: naming a project folder.
-        self._tab = (
-            TAB_FILES if (self._recent_files or session_count) else TAB_PROJECTS
-        )
+        self._this_folder = this_folder
+        # Writing cwd → Projects tab with "This folder" highlighted. Otherwise
+        # Recent Files when there is something to resume; else Projects.
+        if this_folder is not None:
+            self._tab = TAB_PROJECTS
+        elif self._recent_files or session_count:
+            self._tab = TAB_FILES
+        else:
+            self._tab = TAB_PROJECTS
 
     def _logo_markup(self, compact: bool | None = None) -> str:
         mark = token(self.app, "md-heading")  # "MARK" — heading color
@@ -435,8 +442,24 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
                         )
                     )
         elif self._tab == TAB_PROJECTS:
+            # Path field stays available for typing; browse modal is the
+            # primary "Open another folder" path.
             folder.set_class(True, "shown")
+            if self._this_folder is not None:
+                name = self._this_folder.name or str(self._this_folder)
+                ol.add_option(
+                    Option(
+                        f"This folder — {name}   [{dim}]{abbreviate_dir(self._this_folder)}[/]",
+                        id=_THIS_ID,
+                    )
+                )
             for p in self._recent:
+                # Don't duplicate the cwd row in the recent list underneath.
+                if (
+                    self._this_folder is not None
+                    and p.resolve() == self._this_folder.resolve()
+                ):
+                    continue
                 ol.add_option(Option(self._recent_label(p), id=str(p)))
             ol.add_option(Option("Open another folder…", id=_BROWSE_ID))
         else:  # TAB_NEW
@@ -445,16 +468,7 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
 
         if ol.option_count:
             ol.highlighted = 0
-        # First run has an empty file list, so put the writer in the path field.
-        if (
-            self._tab == TAB_PROJECTS
-            and not self._recent
-            and not self._recent_files
-            and not self._session_count
-        ):
-            folder.focus()
-        else:
-            ol.focus()
+        ol.focus()
 
     # ---- selection -------------------------------------------------------
 
@@ -479,7 +493,9 @@ class WelcomeScreen(ModalScreen[WelcomeChoice | None]):
         elif chosen == _NEW_ID:
             self.dismiss(WelcomeChoice("new"))
         elif chosen == _BROWSE_ID:
-            self.query_one("#welcome-folder", PathInput).focus()
+            self.dismiss(WelcomeChoice("browse"))
+        elif chosen == _THIS_ID and self._this_folder is not None:
+            self.dismiss(WelcomeChoice("folder", self._this_folder))
         elif self._tab == TAB_FILES:
             self.dismiss(WelcomeChoice("file", Path(chosen)))
         else:

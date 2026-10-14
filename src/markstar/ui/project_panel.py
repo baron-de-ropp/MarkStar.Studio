@@ -22,15 +22,27 @@ from markstar.domain.filewalk import MARKDOWN_EXTS, is_openable  # noqa: F401 (r
 from markstar.ui.themes import token
 
 
+def _file_icon(path: Path) -> str:
+    """Quiet two-character glyph for a file kind (no emoji, no desktop icons)."""
+    suffix = path.suffix.lower()
+    if suffix in MARKDOWN_EXTS:
+        return "# "
+    if suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}:
+        return "* "
+    if suffix == ".pdf":
+        return "p "
+    return "- "
+
+
 class WriterTree(DirectoryTree):
     """DirectoryTree for writers: directories + all files (so images, PDFs, and
     other link/embed targets are visible), hidden dot-entries omitted. Quiet
-    ASCII outline icons (spec: no emoji). Open files are brightened; the active
-    file is highlighted."""
+    ASCII icons (folders ``+``/``-``, Markdown ``#``, images ``*``). Open files
+    are brightened; the active file is highlighted."""
 
-    ICON_NODE = "▸ "           # collapsed folder
-    ICON_NODE_EXPANDED = "▾ "  # expanded folder
-    ICON_FILE = "· "           # file
+    ICON_NODE = "+ "           # collapsed folder
+    ICON_NODE_EXPANDED = "- "  # expanded folder
+    ICON_FILE = "# "           # default document; render_label may refine
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -125,7 +137,7 @@ class WriterTree(DirectoryTree):
         #   non-openable file      → faintest (can't be edited; link target only)
         #   folders + closed files → dim (clearly below the editor text)
         #   open file (in a tab)   → brighter name
-        #   active file            → brighter name, and its bullet in the accent
+        #   active file            → brighter name, and its icon in the accent
         key = None
         path = getattr(getattr(node, "data", None), "path", None)
         if path is not None:
@@ -133,6 +145,11 @@ class WriterTree(DirectoryTree):
                 key = str(Path(path).resolve())
             except Exception:
                 key = None
+            # Swap the generic file icon for a quiet type glyph.
+            if not node.allow_expand and len(label) >= 2:
+                icon = _file_icon(Path(path))
+                name = label.plain[2:]
+                label = Text(icon + name)
         # A non-openable file (image/PDF/etc.) reads faintest and never bold.
         if path is not None and not node.allow_expand and not is_openable(path):
             label.stylize(Style(color=token(self.app, "rule"), bold=False))
@@ -141,7 +158,7 @@ class WriterTree(DirectoryTree):
         dim = token(self.app, "tab-inactive")
         if key is not None and key == self._active_path:
             label.stylize(Style(color=bright, bold=False))
-            if len(label) >= 2:  # bullet only → accent
+            if len(label) >= 2:  # icon only → accent
                 label.stylize(Style(color=token(self.app, "hint-key"), bold=True), 0, 2)
         elif key is not None and key in self._open_paths:
             label.stylize(Style(color=bright, bold=False))

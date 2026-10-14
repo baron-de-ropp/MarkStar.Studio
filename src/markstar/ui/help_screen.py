@@ -32,9 +32,17 @@ _CONTEXT_KEYS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "While the project panel has focus",
         [
-            ("Ctrl+F", "Find across the whole project"),
+            ("Ctrl+F", "Find / replace across the whole project (same as F8)"),
             ("Ctrl+P", "Back to the editor"),
             ("Enter", "Open the selected file"),
+        ],
+    ),
+    (
+        "Project find / replace",
+        [
+            ("F8", "Find / Replace in Project…"),
+            ("Enter", "Run find (from the project find modal)"),
+            ("Ctrl+L", "Replace all in project (from the modal)"),
         ],
     ),
     (

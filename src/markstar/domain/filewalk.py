@@ -43,6 +43,38 @@ def is_openable(path) -> bool:
     return Path(path).suffix.lower() in MARKDOWN_EXTS
 
 
+def is_writing_folder(path: Path | str, *, home: Path | None = None) -> bool:
+    """True if ``path`` is a sensible splash "This folder" default.
+
+    Must be an existing directory, must not be the filesystem root or the user's
+    home directory, and must contain at least one Markdown/plain-text document
+    at the *top level* (no deep scan — that would surprise people in large trees).
+    """
+    try:
+        folder = Path(path).expanduser().resolve()
+    except OSError:
+        return False
+    if not folder.is_dir():
+        return False
+    if folder == Path("/"):
+        return False
+    home = Path.home() if home is None else home
+    try:
+        if folder == home.expanduser().resolve():
+            return False
+    except OSError:
+        pass
+    try:
+        for child in folder.iterdir():
+            if child.name.startswith("."):
+                continue
+            if child.is_file() and is_openable(child):
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def list_project_files(
     root: Path | str, *, max_files: int = 2000, max_visited: int = 20000
 ) -> list[str]:

@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from markstar.domain.filewalk import list_project_files
-from markstar.domain.search import find_all
+from markstar.domain.search import find_all, replace_all
+from markstar.domain.document import Document
 
 MAX_FILE_BYTES = 2_000_000   # skip anything that isn't plausibly a manuscript
 MAX_HITS = 500               # a results list nobody would scroll past
@@ -32,6 +33,12 @@ class Results(NamedTuple):
     hits: list[Hit]
     files_searched: int
     truncated: bool   # a limit stopped the search before it finished
+
+
+class ReplaceResult(NamedTuple):
+    replacements: int
+    files_changed: int
+    files_searched: int
 
 
 def search_project(
@@ -81,3 +88,43 @@ def search_project(
             if len(hits) >= max_hits:
                 return Results(hits, searched, True)
     return Results(hits, searched, truncated)
+
+
+def replace_in_project(
+    root: Path | str,
+    query: str,
+    replacement: str,
+    *,
+    case_sensitive: bool = False,
+) -> ReplaceResult:
+    """Replace ``query`` with ``replacement`` in every project document on disk.
+
+    Reads and writes each openable file under ``root``. Returns how many
+    substitutions ran and how many files changed. Empty query is a no-op.
+    """
+    if not query:
+        return ReplaceResult(0, 0, 0)
+    root = Path(root)
+    replacements = 0
+    files_changed = 0
+    searched = 0
+    for rel in list_project_files(root):
+        path = root / rel
+        try:
+            if path.stat().st_size > MAX_FILE_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        searched += 1
+        doc = Document(text)
+        n = replace_all(doc, query, replacement, case_sensitive=case_sensitive)
+        if n == 0:
+            continue
+        try:
+            path.write_text(doc.text, encoding="utf-8")
+        except OSError:
+            continue
+        replacements += n
+        files_changed += 1
+    return ReplaceResult(replacements, files_changed, searched)

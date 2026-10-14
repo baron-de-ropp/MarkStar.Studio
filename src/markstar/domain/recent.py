@@ -44,6 +44,31 @@ def prune_missing(items: list[str]) -> list[str]:
     return kept
 
 
+def prune_forbidden_projects(
+    items: list[str], *, home: Path | None = None
+) -> list[str]:
+    """Drop project roots that must never be treated as a manuscript folder.
+
+    ``$HOME`` and ``/`` are useful places to *launch from*, but opening them as
+    the project turns the file tree into "everything on the machine."
+    """
+    home = Path.home() if home is None else home
+    try:
+        home_key = str(home.expanduser().resolve())
+    except OSError:
+        home_key = str(home)
+    kept: list[str] = []
+    for x in items:
+        try:
+            key = str(Path(x).expanduser().resolve())
+        except OSError:
+            continue
+        if key in (home_key, "/"):
+            continue
+        kept.append(x)
+    return kept
+
+
 def relative_age(mtime: float, now: float | None = None) -> str:
     """Human-scale age of a timestamp: "3h ago", "2d ago", "Mar 2024"."""
     now = time.time() if now is None else now

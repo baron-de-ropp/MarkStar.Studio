@@ -36,7 +36,9 @@ from markstar.domain.session import save as session_save
 from markstar.domain.document import Document
 from markstar.domain import wordcount
 from markstar.domain.export import export as export_document
-from markstar.domain.recent import prune_missing, push_recent
+from markstar.domain.filewalk import is_writing_folder
+from markstar.domain.recent import prune_forbidden_projects, prune_missing, push_recent
+from markstar.domain.projectsearch import replace_in_project, search_project
 from markstar.domain.wordcount import Counts
 from markstar.domain.savepath import resolve_save_path
 from markstar.domain.motion import paragraph_down, paragraph_up, word_left, word_right
@@ -62,16 +64,16 @@ from markstar.domain.spellcheck import Speller
 from markstar.domain.workspace import Workspace
 from markstar.ui.dialogs import (
     ConfirmDialog,
-    PathPrompt,
     RestoreDialog,
     SaveChangesDialog,
 )
 from markstar.domain.outline import headings as md_headings
-from markstar.domain.projectsearch import search_project
 from markstar.ui.export_dialog import ExportDialog
+from markstar.ui.file_browser import FileBrowserScreen
 from markstar.ui.find_results import FindResultsScreen
 from markstar.ui.help_screen import HelpScreen
 from markstar.ui.outline import OutlineScreen
+from markstar.ui.project_find import ProjectFindReplaceScreen
 from markstar.ui.quick_open import QuickOpenScreen
 from markstar.ui.edit_card import EditCard
 from markstar.ui.editor_session import EditorSession
@@ -427,6 +429,8 @@ class MarkStarApp(App[None]):
     Screen {
         layout: vertical;
         background: $background;
+        /* base = editor chrome; overlay = menu ribbon + project/StarBot panels */
+        layers: base overlay;
     }
 
     /* Text-entry areas get the I-beam / typewriter mouse pointer (OSC 22;
@@ -435,9 +439,11 @@ class MarkStarApp(App[None]):
         pointer: text;
     }
 
-    /* Top-line menu ribbon (first terminal row when open). */
+    /* Top-line menu ribbon — overlays the editor; shell is transparent so
+       prose stays visible beside the dropdown. */
     #app-menu {
         dock: top;
+        layer: overlay;
         width: 100%;
         height: auto;
     }
@@ -681,6 +687,11 @@ class MarkStarApp(App[None]):
         self._starbot_chat = None  # ai.chat.StarBotChat, built lazily on first use
         self._starbot_transcript = None  # ai.history.ChatTranscript for the session
         self._starbot_proposals = {}  # proposal id -> (EditProposal, EditCard)
+        # Older builds could record $HOME as a "project"; strip that on load.
+        cleaned = prune_forbidden_projects(self.prefs.recent_projects)
+        if cleaned != list(self.prefs.recent_projects):
+            self.prefs.recent_projects = cleaned
+            self.prefs.save()
         self._build_commands()
 
     # Compat accessors so callers/tests keep reaching the speller + walk state.
@@ -708,11 +719,49 @@ class MarkStarApp(App[None]):
         return Path.cwd()
 
     def _record_recent_project(self, root: Path) -> None:
-        """Push a folder to the front of the recent-projects list."""
-        self.prefs.recent_projects = push_recent(
-            self.prefs.recent_projects, root, RECENT_PROJECTS_MAX
+        """Push a folder to the front of the recent-projects list.
+
+        ``$HOME`` and ``/`` are never recorded — they turn the tree into a
+        whole-disk browser.
+        """
+        try:
+            resolved = root.expanduser().resolve()
+        except OSError:
+            return
+        try:
+            if resolved == Path.home().resolve() or resolved == Path("/"):
+                return
+        except OSError:
+            if str(resolved) in (str(Path.home()), "/"):
+                return
+        self.prefs.recent_projects = prune_forbidden_projects(
+            push_recent(self.prefs.recent_projects, resolved, RECENT_PROJECTS_MAX)
         )
         self.prefs.save()
+
+    def _has_project(self) -> bool:
+        """True once a project folder has been opened (path arg or Open Folder)."""
+        return self._path_arg is not None
+
+    async def _browse_path(
+        self,
+        title: str,
+        *,
+        mode: str = "file",
+        start: Path | None = None,
+        initial: str = "",
+        hint: str = "",
+    ) -> str | None:
+        """Shared filesystem picker — list + optional typed path."""
+        return await self.push_screen_wait(
+            FileBrowserScreen(
+                title,
+                mode=mode,  # type: ignore[arg-type]
+                start=start or self._project_root(),
+                initial=initial,
+                hint=hint,
+            )
+        )
 
     def _record_recent_file(self, path: Path) -> None:
         """Push a document to the front of the recent-files list."""
@@ -746,8 +795,18 @@ class MarkStarApp(App[None]):
         except OSError:
             return path.parent
         best: Path | None = None
-        for entry in self.prefs.recent_projects:
+        try:
+            home = Path.home().resolve()
+        except OSError:
+            home = Path.home()
+        for entry in prune_forbidden_projects(self.prefs.recent_projects):
             candidate = Path(entry)
+            try:
+                cand = candidate.resolve()
+            except OSError:
+                cand = candidate
+            if cand in (home, Path("/")):
+                continue
             if candidate == target or candidate in target.parents:
                 if best is None or len(candidate.parts) > len(best.parts):
                     best = candidate
@@ -914,7 +973,8 @@ class MarkStarApp(App[None]):
         # File — all single-key or menu-only. Save As / Save All are menu-only
         # (no portable single key worth spending; they're infrequent).
         add("new_file", "New File", "File", self.cmd_new_file, "ctrl+n")
-        add("open_file", "Open File…", "File", self.cmd_open_file, "ctrl+o")
+        add("browse_open_file", "Open File…", "File", self.cmd_browse_open_file)
+        add("open_file", "Quick Open…", "File", self.cmd_open_file, "ctrl+o")
         add("open_folder", "Open Folder…", "File", self.cmd_open_folder)  # menu
         add("recent_projects", "Recent Projects…", "File", self.cmd_welcome)  # menu
         add("close", "Close", "File", self.cmd_close, "ctrl+w")
@@ -924,7 +984,13 @@ class MarkStarApp(App[None]):
         add("save_as", "Save As…", "File", self.cmd_save_as)  # menu only
         add("save_all", "Save All", "File", self.cmd_save_all)  # menu only
         add("export", "Export…", "File", self.cmd_export, "f5")
-        add("find_in_project", "Find in Project…", "File", self.cmd_find_in_project)
+        add(
+            "find_in_project",
+            "Find / Replace in Project…",
+            "File",
+            self.cmd_find_in_project,
+            "f8",
+        )
         add("compile", "Compile…", "File", self.cmd_compile)  # expand includes → .md
         add("quit", "Exit", "File", self.cmd_quit, "ctrl+q")
 
@@ -1029,7 +1095,7 @@ class MarkStarApp(App[None]):
         add("send_feedback", "Send Feedback…", "Help", self.cmd_send_feedback)
 
     def compose(self) -> ComposeResult:
-        # First terminal line when open (dock top) — not a modal overlay.
+        # Overlay ribbon (dock top + layer overlay) — editor stays put underneath.
         yield MenuBar(self.registry, id="app-menu")
         with Vertical(id="main"):
             # blank · filename · blank · thin rule · (find) · editor
@@ -1630,6 +1696,10 @@ class MarkStarApp(App[None]):
             event.stop()
             self.cmd_toggle_spellcheck()
             return
+        if key == "f8":
+            event.stop()
+            self.cmd_find_in_project()
+            return
         if key == "ctrl+b":
             event.stop()
             self.cmd_bold()
@@ -1689,12 +1759,12 @@ class MarkStarApp(App[None]):
         except Exception:
             return
         folder = panel.target_dir()
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                "New file — name it",
-                initial=str(folder) + "/",
-                hint="Enter create · Esc cancel · bare name → .md",
-            )
+        raw = await self._browse_path(
+            "New file — name it",
+            mode="save",
+            start=folder,
+            initial=str(folder / "untitled.md"),
+            hint="Enter create · Esc cancel · bare name → .md",
         )
         if raw is None:
             return
@@ -1730,6 +1800,30 @@ class MarkStarApp(App[None]):
 
     def action_open_file(self) -> None:
         self.cmd_open_file()
+
+    def cmd_browse_open_file(self) -> None:
+        """Works-style Open File — navigable folder list (File → Open File…)."""
+        self.run_worker(self._browse_open_file_async())
+
+    async def _browse_open_file_async(self) -> None:
+        start = self._project_root() if self._has_project() else Path.cwd()
+        raw = await self._browse_path(
+            "Open File",
+            mode="file",
+            start=start,
+            initial=str(start) + "/",
+        )
+        if raw is None:
+            return
+        path = Path(raw.strip().strip('"').strip("'")).expanduser()
+        if not path.is_file():
+            self.notify(f"Not a file: {path}", severity="warning")
+            return
+        if self._has_project():
+            pass
+        else:
+            self._set_project_root(self._infer_project_root(path), focus_tree=False)
+        self._open_doc(path, must_exist=True)
 
     async def _quick_open_async(self) -> None:
         recents = self._recent_files()
@@ -1779,7 +1873,12 @@ class MarkStarApp(App[None]):
         self.run_worker(self._show_welcome())
 
     async def _show_welcome(self) -> None:
-        recent = [Path(p) for p in self.prefs.recent_projects]
+        # Drop $HOME / / if an older build recorded them as "projects".
+        cleaned = prune_forbidden_projects(self.prefs.recent_projects)
+        if cleaned != self.prefs.recent_projects:
+            self.prefs.recent_projects = cleaned
+            self.prefs.save()
+        recent = [Path(p) for p in cleaned]
         files: list[tuple[Path, float]] = []
         for entry in self._recent_files():
             p = Path(entry)
@@ -1788,9 +1887,16 @@ class MarkStarApp(App[None]):
             except OSError:
                 continue
         saved = session_load(session_path()).existing() if self.prefs.restore_session else Session()
+        cwd = Path.cwd()
+        this_folder = cwd if is_writing_folder(cwd) else None
         choice = await self.push_screen_wait(
             WelcomeScreen(
-                self._project_root(), __version__, recent, files, len(saved.files)
+                self._project_root(),
+                __version__,
+                recent,
+                files,
+                len(saved.files),
+                this_folder=this_folder,
             )
         )
         if choice is None or choice.kind == "new":
@@ -1800,6 +1906,9 @@ class MarkStarApp(App[None]):
             return
         if choice.kind == "quick_open":
             await self._quick_open_async()
+            return
+        if choice.kind == "browse":
+            await self._open_folder_async()
             return
         if choice.kind == "file" and choice.path is not None:
             # Point the panel at the file's project so the tree is useful, the
@@ -1840,12 +1949,14 @@ class MarkStarApp(App[None]):
         self.run_worker(self._open_folder_async())
 
     async def _open_folder_async(self) -> None:
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                "Open Folder — enter a directory path",
-                initial=str(self._project_root()) + "/",
-                hint="Enter open · Esc cancel · ~ allowed",
-            )
+        # Project picker — start at $HOME so every manuscript folder is in
+        # reach. (Save/Open File still start in the current project.)
+        start = Path.home()
+        raw = await self._browse_path(
+            "Open Folder",
+            mode="folder",
+            start=start,
+            initial=str(start) + "/",
         )
         if raw is None:
             return
@@ -1856,6 +1967,15 @@ class MarkStarApp(App[None]):
         if not path.is_dir():
             self.notify(f"Not a folder: {path}", severity="warning")
             return
+        try:
+            if path.resolve() == Path.home().resolve() or path.resolve() == Path("/"):
+                self.notify(
+                    "Home and / can't be project folders — pick a manuscript folder",
+                    severity="warning",
+                )
+                return
+        except OSError:
+            pass
         self._set_project_root(path)
 
     @on(WriterTree.FileSelected)
@@ -2143,12 +2263,15 @@ class MarkStarApp(App[None]):
 
     async def _prompt_and_save_async(self, *, title: str, initial: str = "") -> bool:
         """Ask for a path, confirm overwrite if needed, save. True if written."""
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                title,
-                initial=initial or str(self._untitled_default()),
-                hint="Enter path · Enter save · Esc cancel · ~ allowed",
-            )
+        default = initial or str(self._untitled_default())
+        start = Path(default).expanduser().parent
+        if not start.is_dir():
+            start = self._save_base_dir()
+        raw = await self._browse_path(
+            title,
+            mode="save",
+            start=start,
+            initial=default,
         )
         if raw is None:
             return False
@@ -2417,24 +2540,23 @@ class MarkStarApp(App[None]):
             self._goto_line(line)
 
     def cmd_find_in_project(self) -> None:
-        """Search every document in the project (Ctrl+F with the tree focused)."""
+        """Find / replace across every document in the project (F8)."""
         self.run_worker(self._find_in_project_async())
 
     async def _find_in_project_async(self) -> None:
-        if self._path_arg is None:
+        if not self._has_project():
             self.notify("Open a project folder first", severity="warning")
             return
         root = self._project_root()
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                f"Find in {root.name or root}",
-                initial="",
-                hint="Enter search · Esc cancel",
-            )
+        choice = await self.push_screen_wait(
+            ProjectFindReplaceScreen(root.name or str(root))
         )
-        if raw is None or not raw.strip():
+        if choice is None:
             return
-        query = raw.strip()
+        action, query, replacement = choice
+        if action == "replace_all":
+            await self._replace_in_project_async(root, query, replacement)
+            return
         self.notify(f"Searching {root.name or root}…")
         results = await asyncio.get_running_loop().run_in_executor(
             None,
@@ -2453,6 +2575,94 @@ class MarkStarApp(App[None]):
             return
         if self._open_doc(hit.path, must_exist=True):
             self._goto_line(hit.line, hit.column)
+
+    async def _replace_in_project_async(
+        self, root: Path, query: str, replacement: str
+    ) -> None:
+        """Save dirty project tabs, confirm, then replace on disk."""
+        preview = await asyncio.get_running_loop().run_in_executor(
+            None,
+            partial(
+                search_project, root, query, case_sensitive=self._find.case_sensitive
+            ),
+        )
+        if not preview.hits:
+            self.notify(
+                f"No hits for {query!r} in {preview.files_searched} file(s)",
+                severity="warning",
+            )
+            return
+        files = len({h.relative for h in preview.hits})
+        ok = await self.push_screen_wait(
+            ConfirmDialog(
+                title="Replace all in project?",
+                message=(
+                    f'Replace {len(preview.hits)} match'
+                    f'{"es" if len(preview.hits) != 1 else ""} of {query!r}\n'
+                    f"with {replacement!r} in {files} file"
+                    f'{"s" if files != 1 else ""}?\n\n'
+                    "Dirty tabs in this project will be saved first."
+                ),
+                yes_label="replace all",
+                no_label="cancel",
+            )
+        )
+        if not ok:
+            return
+        self._sync_document_from_editor()
+        try:
+            root_res = root.resolve()
+        except OSError:
+            root_res = root
+
+        def _under_project(doc_path: Path) -> bool:
+            try:
+                return doc_path.resolve().is_relative_to(root_res)
+            except (OSError, ValueError):
+                return False
+
+        # Save every dirty project tab first (shared understanding).
+        for doc in self.workspace.documents:
+            if not doc.dirty or doc.path is None or not _under_project(doc.path):
+                continue
+            try:
+                doc.save()
+                delete_sidecar(doc.path)
+            except OSError as exc:
+                self.notify(
+                    f"Replace cancelled — save failed ({doc.path.name}): {exc}",
+                    severity="error",
+                )
+                return
+
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            partial(
+                replace_in_project,
+                root,
+                query,
+                replacement,
+                case_sensitive=self._find.case_sensitive,
+            ),
+        )
+        # Reload open project tabs so the editor matches disk.
+        for i, doc in enumerate(self.workspace.documents):
+            if doc.path is None or not _under_project(doc.path):
+                continue
+            try:
+                text = doc.path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if text == doc.text:
+                continue
+            doc.replace(0, len(doc.text), text)
+            doc.mark_saved()
+            if i == self.workspace.active_index:
+                self._load_active_into_editor()
+        self._refresh_status()
+        self.notify(
+            f"Replaced {result.replacements} in {result.files_changed} file(s)"
+        )
 
     def cmd_export(self) -> None:
         """Export the manuscript to HTML / DOCX / PDF / EPUB (F5)."""
@@ -2479,12 +2689,11 @@ class MarkStarApp(App[None]):
         doc = self.document
         stem = doc.path.stem if doc.path else "untitled"
         default_dir = doc.path.parent if doc.path else self._save_base_dir()
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                f"Export {chosen.key.upper()} — where should it go?",
-                initial=str(default_dir / f"{stem}{chosen.suffix}"),
-                hint="Enter export · Esc cancel · ~ allowed",
-            )
+        raw = await self._browse_path(
+            f"Export {chosen.key.upper()} — where should it go?",
+            mode="save",
+            start=default_dir,
+            initial=str(default_dir / f"{stem}{chosen.suffix}"),
         )
         if raw is None:
             return
@@ -2532,12 +2741,11 @@ class MarkStarApp(App[None]):
             default = str(doc.path.with_name(doc.path.stem + _COMPILED_SUFFIX))
         else:
             default = str(Path.cwd() / f"compiled{_DEFAULT_SUFFIX}")
-        raw = await self.push_screen_wait(
-            PathPrompt(
-                "Compile — where should the combined Markdown go?",
-                initial=default,
-                hint="Enter save · Esc cancel · ~ allowed",
-            )
+        raw = await self._browse_path(
+            "Compile — where should the combined Markdown go?",
+            mode="save",
+            start=Path(default).parent,
+            initial=default,
         )
         if raw is None:
             return
